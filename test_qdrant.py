@@ -1,13 +1,16 @@
+# LEGACY: Kept for audit trail only.
+# This script references deleted Qdrant collections and hardcoded testing keys.
 import sys
 import io
+import os
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
 
-QDRANT_URL = "https://a0441c7c-5f39-4170-961b-e64c0ef95fe5.us-west-1-0.aws.cloud.qdrant.io:6333"
-QDRANT_API_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhY2Nlc3MiOiJtIiwic3ViamVjdCI6ImFwaS1rZXk6YjhmZDY3ZjEtODE4Mi00NDkwLWIyOWUtMDQ0MThlZmE1M2VhIn0.gTT_CXAjS7fLwLJYYn-F6JYR-SjMXd5kfB4kOKqtpeE"
+QDRANT_URL = os.environ.get("QDRANT_URL")
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 COLLECTION_NAME = "echo_sight_hindi"
 
 client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)

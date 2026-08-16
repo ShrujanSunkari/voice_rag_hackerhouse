@@ -22,3 +22,27 @@ __pycache__/
 .venv
 env/
 venv/
+
+# Local cache, keys and validation files
+apis.txt
+val_cache.json
+diagnostic_results.txt
+flagged_anomalies.txt
+results_v4.txt
+latency_results.csv
+latency_summary.json
+real_queries.json
+
+# Large Data files
+*.parquet
+*.wav
+
+# Logs
+*.log
+
+# Next.js build / cache ignores
+.next/
+tsconfig.tsbuildinfo
+tsconfig.tsbuildinfo.local
+.cache/
+.huggingface/

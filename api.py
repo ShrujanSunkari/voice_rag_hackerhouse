@@ -18,7 +18,7 @@ load_dotenv()
 # ==========================================
 # 1. SETUP & CREDENTIALS
 # ==========================================
-QDRANT_URL = "https://a0441c7c-5f39-4170-961b-e64c0ef95fe5.us-west-1-0.aws.cloud.qdrant.io:6333"
+QDRANT_URL = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY")
@@ -27,10 +27,10 @@ qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 groq_client = Groq(api_key=GROQ_API_KEY)
 
 print("Loading local embedder for queries...")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
-print("✅ API Setup Complete.")
+embedder = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+print("API Setup Complete.")
 
-COLLECTION_NAME = "echo_sight_hindi"
+COLLECTION_NAME = "echo_sight_hindi_v4"
 app = FastAPI(title="Echo-Sight Voice RAG API")
 
 app.add_middleware(
@@ -130,6 +130,24 @@ DO NOT add any other text, markdown, or conversational filler outside of the HIN
     status = "UNANSWERABLE" if "UNANSWERABLE" in raw_response or "क्षमा करें" in raw_response else "ANSWERED"
     return RAGResponse(synthesized_answer=raw_response, status=status)
 
+def retrieve_context(search_query: str):
+    import time
+    t0 = time.time()
+    query_vector = embedder.encode(search_query).tolist()
+    t1 = time.time()
+    search_response = qdrant_client.query_points(
+        collection_name=COLLECTION_NAME,
+        query=query_vector,
+        limit=10,
+        with_payload=True
+    )
+    t2 = time.time()
+    return search_response.points, {
+        "embedding_ms": (t1 - t0) * 1000,
+        "qdrant_network_ms": (t2 - t1) * 1000,
+        "total_ms": (t2 - t0) * 1000
+    }
+
 @app.post("/api/query", response_model=QueryResponse)
 async def process_voice_query(request: QueryRequest):
     start_time = time.time()
@@ -144,15 +162,7 @@ async def process_voice_query(request: QueryRequest):
         except Exception as e:
             print(f"Translation failed: {e}")
             
-    query_vector = embedder.encode(search_query).tolist()
-
-    search_response = qdrant_client.query_points(
-        collection_name=COLLECTION_NAME,
-        query=query_vector,
-        limit=3,
-        with_payload=True
-    )
-    search_result = search_response.points
+    search_result, _ = retrieve_context(search_query)
 
     if not search_result or search_result[0].score < 0.45:
         latency = round((time.time() - start_time) * 1000, 2)
@@ -239,14 +249,7 @@ async def process_raw_audio(file: UploadFile = File(...)):
         print(f"Translation Error: {e}")
         hindi_query = transcript
         
-    query_vector = embedder.encode(hindi_query).tolist()
-    search_response = qdrant_client.query_points(
-        collection_name=COLLECTION_NAME,
-        query=query_vector,
-        limit=3,
-        with_payload=True
-    )
-    search_result = search_response.points
+    search_result, _ = retrieve_context(hindi_query)
     
     if not search_result or search_result[0].score < 0.45:
         latency = round((time.time() - total_start_time) * 1000, 2)

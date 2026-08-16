@@ -1,27 +1,41 @@
+# LEGACY: Kept for audit trail only.
+# This script references deleted Qdrant collections.
+# Superseded by corrected_indexer.py and full-scale indexing configurations documented in DATA_PROVENANCE.md.
 import os
-import chromadb
+import json
+import argparse
+import uuid
+import datetime
+import pandas as pd
 from sentence_transformers import SentenceTransformer
+from qdrant_client import QdrantClient
+from qdrant_client.http.models import PointStruct
+from dotenv import load_dotenv
 
-# 1. Setup ChromaDB and Embedding Model
-print("Initializing Embedding Model and ChromaDB...")
+load_dotenv()
+
+# 1. Setup argparse
+parser = argparse.ArgumentParser(description="Offline Indexer for Qdrant")
+parser.add_argument("--strategy", type=str, choices=["metadata", "semantic", "fixed_overlap", "hybrid"], required=True, help="Chunking strategy to use")
+parser.add_argument("--limit", type=int, default=50, help="Number of rows to process from parquet file")
+args = parser.parse_args()
+
+# 2. Setup Qdrant and Embedding Model
+print("Initializing Embedding Model and QdrantClient...")
 embedder = SentenceTransformer('all-MiniLM-L6-v2')
-chroma_client = chromadb.PersistentClient(path="./chroma_db")
 
-collection_name = "msmarco_indic_chunks"
-try:
-    chroma_client.delete_collection(name=collection_name)
-except:
-    pass
-collection = chroma_client.create_collection(name=collection_name)
+QDRANT_URL = "https://a0441c7c-5f39-4170-961b-e64c0ef95fe5.us-west-1-0.aws.cloud.qdrant.io:6333"
+QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
+collection_name = "echo_sight_hindi"
 
-# 2. Local Sample Data (Simulating Hindi MSMARCO data for hackathon speed)
-sample_data = [
-    {"query_id": "q1", "query": "भारत की राजधानी क्या है?", "passage": "नई दिल्ली भारत की राजधानी है और यह यमुना नदी के किनारे स्थित है।"},
-    {"query_id": "q2", "query": "कृषि का महत्व क्या है?", "passage": "भारत एक कृषि प्रधान देश है जहाँ Sउपनिवेशिक काल से ही खेती मुख्य व्यवसाय रहा है।"},
-    {"query_id": "q3", "query": "विज्ञान और प्रौद्योगिकी", "passage": "आधुनिक युग में तकनीकी विकास तेजी से हो रहा है जिसमें कृत्रिम बुद्धिमत्ता मुख्य है।"}
-]
+qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY)
 
-# 3. The 4 Required Chunking Strategies
+# 3. Load Parquet Data
+print(f"Loading data from hintrain.parquet (limit={args.limit})...")
+df = pd.read_parquet('hintrain.parquet')
+sample_data = df.head(args.limit)
+
+# 4. The 4 Required Chunking Strategies
 def chunk_metadata(doc_id, text, metadata):
     return [{"chunk_id": f"{doc_id}_meta", "text": text, "strategy": "metadata", **metadata}]
 
@@ -29,7 +43,8 @@ def chunk_semantic(doc_id, text, metadata):
     sentences = [s.strip() + "।" for s in text.replace(".", "।").split("।") if s.strip()]
     return [{"chunk_id": f"{doc_id}_sem_{i}", "text": s, "strategy": "semantic", **metadata} for i, s in enumerate(sentences)]
 
-def chunk_fixed_overlap(doc_id, text, metadata, window=10, overlap=2):
+def chunk_fixed_overlap(doc_id, text, metadata, window=30, overlap=5):
+    # Using larger window than 10 words for practical use, though logic remains same
     words = text.split()
     chunks = []
     for i in range(0, len(words), window - overlap):
@@ -42,37 +57,72 @@ def chunk_hybrid(doc_id, text, query, metadata):
     hybrid_text = f"Query Context: {query} | Passage: {text}"
     return [{"chunk_id": f"{doc_id}_hyb", "text": hybrid_text, "strategy": "hybrid", **metadata}]
 
-# 4. Process and Extract Chunks
-documents = []
-metadatas = []
-ids = []
+# 5. Process and Extract Chunks
+points = []
+print(f"Applying '{args.strategy}' chunking strategy...")
 
-print("Applying 4 chunking strategies...")
-for row in sample_data:
-    doc_id = row['query_id']
-    query = row['query']
-    passage_text = row['passage']
+for _, row in sample_data.iterrows():
+    doc_id = str(row['query_id'])
+    query = str(row['query'])
+    # Extract passages correctly
+    passages_obj = row['passages']
+    passage_text = ""
+    if isinstance(passages_obj, dict) and 'Translated_passages' in passages_obj:
+        translated = passages_obj['Translated_passages']
+        if len(translated) > 0:
+            passage_text = " ".join([str(t) for t in translated])
+    else:
+        passage_text = str(passages_obj)
+        
+    if not passage_text.strip():
+        continue
     
-    base_meta = {"docId": doc_id, "language": "hi"}
+    base_meta = {"doc_id": doc_id, "language": "hi"}
     
-    all_chunks = []
-    all_chunks.extend(chunk_metadata(doc_id, passage_text, base_meta))
-    all_chunks.extend(chunk_semantic(doc_id, passage_text, base_meta))
-    all_chunks.extend(chunk_fixed_overlap(doc_id, passage_text, base_meta))
-    all_chunks.extend(chunk_hybrid(doc_id, passage_text, query, base_meta))
+    chunks = []
+    if args.strategy == "metadata":
+        chunks = chunk_metadata(doc_id, passage_text, base_meta)
+    elif args.strategy == "semantic":
+        chunks = chunk_semantic(doc_id, passage_text, base_meta)
+    elif args.strategy == "fixed_overlap":
+        chunks = chunk_fixed_overlap(doc_id, passage_text, base_meta)
+    elif args.strategy == "hybrid":
+        chunks = chunk_hybrid(doc_id, passage_text, query, base_meta)
     
-    for chunk in all_chunks:
-        ids.append(chunk['chunk_id'])
-        documents.append(chunk['text'])
-        clean_meta = {k: v for k, v in chunk.items() if k not in ['chunk_id', 'text'] and v is not None}
-        metadatas.append(clean_meta)
+    for chunk in chunks:
+        # Generate a deterministic UUID based on chunk_id so we overwrite existing chunks instead of duplicating
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, chunk['chunk_id']))
+        text = chunk.pop('text')
+        
+        # Embed the text
+        vector = embedder.encode(text).tolist()
+        
+        # Prepare payload
+        payload = {"text": text, **chunk}
+        
+        points.append(PointStruct(id=point_id, vector=vector, payload=payload))
 
-# 5. Embed and Index
-print(f"Embedding and indexing {len(ids)} chunks into ChromaDB...")
-collection.add(
-    documents=documents,
-    metadatas=metadatas,
-    ids=ids
-)
+# 6. Embed and Index
+print(f"Uploading {len(points)} chunks into Qdrant collection '{collection_name}'...")
+if points:
+    # Upload in batches
+    batch_size = 100
+    for i in range(0, len(points), batch_size):
+        batch = points[i:i + batch_size]
+        qdrant_client.upsert(
+            collection_name=collection_name,
+            points=batch
+        )
 
-print("✅ Offline indexing complete! Database saved to ./chroma_db")
+# 7. Write Manifest
+manifest = {
+    "timestamp": datetime.datetime.now().isoformat(),
+    "strategy": args.strategy,
+    "rows_processed": len(sample_data),
+    "chunks_created": len(points),
+    "collection": collection_name
+}
+with open("manifest.json", "w") as f:
+    json.dump(manifest, f, indent=4)
+
+print("Offline indexing complete! Manifest saved to manifest.json")

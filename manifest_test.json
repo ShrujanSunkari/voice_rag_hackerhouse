@@ -1,0 +1,20 @@
+{
+    "timestamp": "2026-08-16T13:50:59.706658",
+    "collection": "echo_sight_hindi_test_v2",
+    "split": "validation",
+    "strategies": [
+        "metadata_aware",
+        "semantic",
+        "fixed_overlap",
+        "hybrid"
+    ],
+    "rows_processed": 540,
+    "rows_skipped": 460,
+    "total_chunks": 3900,
+    "strategy_counts": {
+        "metadata_aware": 540,
+        "semantic": 1550,
+        "fixed_overlap": 1270,
+        "hybrid": 540
+    }
+}

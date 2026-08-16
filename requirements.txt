@@ -7,3 +7,8 @@ groq
 tenacity
 requests
 python-dotenv
+pandas
+pyarrow
+datasets
+python-multipart
+

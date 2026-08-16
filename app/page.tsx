@@ -50,9 +50,19 @@ function Splash({ onInitialize }: { onInitialize: () => void }) {
 }
 
 export default function Page() {
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
-  const audioChunksRef = useRef<Blob[]>([])
-  const recognitionRef = useRef<any>(null)
+  const suggestedQueries = [
+    { text: "व्यवसाय प्रक्रिया प्रबंधन क्या है", label: "व्यवसाय प्रक्रिया प्रबंधन क्या है", isGuardrail: false },
+    { text: "खाने के बाद एक व्यक्ति को इतनी नींद क्यों आती है", label: "खाने के बाद एक व्यक्ति को इतनी नींद क्यों आती है", isGuardrail: false },
+    { text: "शोध समन्वयक के लिए वेतन सीमा", label: "शोध समन्वयक के लिए वेतन सीमा", isGuardrail: false },
+    { text: "आइसो सेंसर का क्या अर्थ है", label: "आइसो सेंसर का क्या अर्थ है", isGuardrail: false },
+    { text: "नकारात्मक प्रतिक्रिया हृदय गति को कैसे नियंत्रित करती है", label: "नकारात्मक प्रतिक्रिया हृदय गति को कैसे नियंत्रित करती है", isGuardrail: false },
+    { text: "एम्यूएड होम्योपैथिक क्या है?", label: "एम्यूएड होम्योपैथिक क्या है? (Guardrail Demo)", isGuardrail: true }
+  ]
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const scriptProcessorRef = useRef<ScriptProcessorNode | null>(null)
+  const wsRef = useRef<WebSocket | null>(null)
+  const finalizingRef = useRef(false)
+  const streamRef = useRef<MediaStream | null>(null)
   const answerRef = useRef<HTMLElement>(null)
   const lastSpokenRunRef = useRef<number>(0)
   const [initialized, setInitialized] = useState(false), [booting, setBooting] = useState(false), [text, setText] = useState('How does a grounded multilingual answer work?'), [recording, setRecording] = useState(false), [complete, setComplete] = useState(true), [expanded, setExpanded] = useState(false), [hoverMetric, setHoverMetric] = useState('P70'), [status, setStatus] = useState('Ready for a voice query'), [run, setRun] = useState(1), [tts, setTts] = useState(true), [corePoint, setCorePoint] = useState({ x: 0, y: 0 }), [answer, setAnswer] = useState('The system retrieves relevant evidence, synthesizes a concise response, and exposes the passages and latency behind its answer.'), [evidence, setEvidence] = useState(defaultEvidence), [stages, setStages] = useState(defaultStages), [latencyMs, setLatencyMs] = useState(112), [metrics, setMetrics] = useState(defaultMetrics), [citationCount, setCitationCount] = useState(3), [queryError, setQueryError] = useState<string | null>(null)
@@ -146,57 +156,108 @@ export default function Page() {
     return () => clearInterval(interval)
   }, [])
 
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-      if (SpeechRecognition && !recognitionRef.current) {
-        const recognition = new SpeechRecognition()
-        recognition.continuous = true
-        recognition.interimResults = true
-        recognition.lang = 'hi-IN'
 
-        recognition.onresult = (event: any) => {
-          let finalTranscript = ''
-          for (let i = 0; i < event.results.length; ++i) {
-            finalTranscript += event.results[i][0].transcript
-          }
-          setText(finalTranscript)
-        }
-
-        recognitionRef.current = recognition
-      }
-    }
-  }, [])
 
   function begin() { if (booting) return; setBooting(true); setTimeout(() => setInitialized(true), 1500); setTimeout(() => setBooting(false), 2400) }
 
   async function startRecording() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      const mediaRecorder = new MediaRecorder(stream)
-      mediaRecorderRef.current = mediaRecorder
-      audioChunksRef.current = []
+      streamRef.current = stream;
 
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          audioChunksRef.current.push(event.data)
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      audioContextRef.current = audioContext;
+
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      scriptProcessorRef.current = processor;
+
+      const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "";
+      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=true&vad_signals=true&flush_signal=true`;
+      const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`]);
+      wsRef.current = ws;
+
+      let currentTranscript = '';
+      let connectionFailed = false;
+
+      ws.onopen = () => {
+        setRecording(true)
+        setComplete(false)
+        setStatus('Recording · speak naturally')
+        setText('')
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === "data" && data.data && data.data.transcript) {
+            currentTranscript = data.data.transcript;
+            setText(currentTranscript);
+            if (finalizingRef.current) {
+              finalizingRef.current = false;
+              try { ws.close() } catch (e) { }
+            }
+          } else if (data.type === "error") {
+            console.error("Sarvam STT error", data);
+            setStatus(data.data?.message || 'Sarvam STT error');
+          }
+        } catch (e) { }
+      };
+
+      ws.onclose = () => {
+        setRecording(false);
+        if (connectionFailed) {
+          setStatus('WebSocket connection failed');
+          setComplete(true);
+          return;
         }
-      }
+        setStatus('Processing speech...');
+        if (currentTranscript.trim()) {
+          runQuery(currentTranscript.trim());
+        } else {
+          setStatus('Ready for a voice query');
+          setComplete(true);
+        }
+      };
 
-      mediaRecorder.onstop = () => {
-        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
-        stream.getTracks().forEach(track => track.stop())
-        uploadAudio(audioBlob)
-      }
+      ws.onerror = (e) => {
+        console.error("WebSocket error", e);
+        connectionFailed = true;
+        setStatus('WebSocket connection failed');
+      };
 
-      mediaRecorder.start()
-      if (recognitionRef.current) {
-        try { recognitionRef.current.start() } catch (e) { }
-      }
-      setRecording(true)
-      setComplete(false)
-      setStatus('Recording · speak naturally')
-      setText('')
+      processor.onaudioprocess = (e) => {
+        if (!ws || ws.readyState !== WebSocket.OPEN) return;
+        const inputData = e.inputBuffer.getChannelData(0);
+        const pcmData = new Int16Array(inputData.length);
+        for (let i = 0; i < inputData.length; i++) {
+          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+        }
+
+        let binary = '';
+        const bytes = new Uint8Array(pcmData.buffer);
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const base64Audio = btoa(binary);
+
+        ws.send(JSON.stringify({
+          audio: {
+            data: base64Audio,
+            sample_rate: "16000",
+            encoding: "pcm_s16le",
+            language_code: "hi-IN"
+          }
+        }));
+      };
+
+      const gainNode = audioContext.createGain();
+      gainNode.gain.value = 0;
+      source.connect(processor);
+      processor.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+
     } catch (err) {
       console.error("Microphone access error", err)
       setStatus('Microphone access denied or not supported')
@@ -204,56 +265,32 @@ export default function Page() {
   }
 
   function stopRecording() {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop()
-      if (recognitionRef.current) {
-        try { recognitionRef.current.stop() } catch (e) { }
-      }
-      setRecording(false)
-      setStatus('Processing speech...')
+    const ws = wsRef.current;
+
+    if (scriptProcessorRef.current) {
+      scriptProcessorRef.current.disconnect();
+      scriptProcessorRef.current = null;
     }
-  }
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setRecording(false);
 
-  async function uploadAudio(audioBlob: Blob) {
-    setComplete(false)
-    setQueryError(null)
-    setStatus('Routing through retrieval harness')
-    setRun((r) => r + 1)
-    setAnswer('Working through the corpus…')
-
-    const formData = new FormData()
-    formData.append('file', audioBlob, 'recording.webm')
-
-    try {
-      const res = await fetch('http://localhost:8000/api/voice', {
-        method: 'POST',
-        body: formData,
-      })
-
-      if (!res.ok) {
-        const detail = await res.text()
-        throw new Error(`Backend returned ${res.status}: ${detail}`)
+    if (ws) {
+      if (ws.readyState === WebSocket.OPEN) {
+        finalizingRef.current = true;
+        try { ws.send(JSON.stringify({ type: 'flush' })) } catch (e) { }
+        setStatus('Finalizing transcript…');
+        setTimeout(() => { try { ws.close() } catch (e) { } }, 1500);
+      } else {
+        try { ws.close() } catch (e) { }
       }
-
-      const data = await res.json()
-      const shards = mapEvidenceShards(data.evidence_shards ?? [])
-      const latency = Math.round(data.latency_ms ?? 0)
-      const citations = data.citations_count ?? shards.length
-
-      setText(data.transcript)
-      setAnswer(data.synthesized_answer)
-      setEvidence(shards.length ? shards : defaultEvidence)
-      setLatencyMs(latency)
-      setCitationCount(citations)
-      setStages(buildStages(latency, shards.length))
-      setComplete(true)
-      setStatus(`Answer grounded · Status: ${data.status || 'ANSWERED'}`)
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Unknown error'
-      setQueryError(message)
-      setAnswer('Could not reach the Drishti backend. Ensure `uvicorn api:app --reload` is running on port 8000, then try again.')
-      setComplete(true)
-      setStatus('Backend offline · check Python server')
+      wsRef.current = null;
     }
   }
 
@@ -314,7 +351,35 @@ export default function Page() {
     <header className="topbar"><div className="brand-lockup"><span className="brand-mark"><span /></span><div><p className="eyebrow">PROJECT ECHO-SIGHT / INTERNAL</p><h1>Drishti OS</h1></div></div><div className="top-meta"><span className="live-dot" /> DRISHTI ONLINE <span className="divider" /> INDEX v0.8.4</div></header>
     <section className="hero-grid"><motion.div className="hero-copy" initial={{ opacity: 0, y: 18 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .15 }}><p className="kicker"><Zap size={13} /> VOICE INTELLIGENCE / TRACEABLE ANSWERS</p><h2>Ask the world.<br /><em>See the signal.</em></h2><p className="lede">A voice-first intelligence layer for navigating fragmented information. Every answer leaves a trace.</p><div className="micro-stats"><span><strong>4</strong> signal paths</span><span><strong>3</strong> evidence layers</span><span><strong>100%</strong> traceable</span></div></motion.div>
       <div className={`core-stage ${recording ? 'is-recording' : ''}`} onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setCorePoint({ x: ((e.clientX - r.left) / r.width - .5) * 12, y: ((e.clientY - r.top) / r.height - .5) * 12 }) }} onMouseLeave={() => setCorePoint({ x: 0, y: 0 })}><div className="core-ripples" aria-hidden="true"><span /><span /><span /></div><motion.div className="core-halo" style={{ '--core-x': `${corePoint.x}px`, '--core-y': `${corePoint.y}px` } as React.CSSProperties} animate={{ rotate: 360 }} transition={{ duration: 30, repeat: Infinity, ease: 'linear' }}><div className="core-inner"><Mic size={29} /></div></motion.div><motion.button className="core-button" whileTap={{ scale: .95 }} whileHover={{ color: '#f7d38b' }} aria-label="Toggle recording" onClick={recording ? stopRecording : startRecording}>{recording ? <Square size={20} fill="currentColor" /> : <Mic size={23} />}</motion.button><p className="core-status"><span className="signal" />{status}</p></div>
-      <motion.div className="query-panel panel-glass" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .3 }}><div className="panel-heading"><div><p className="eyebrow">VOICE TRANSCRIPT / LIVE</p><h3>Shape your question</h3></div><span className="lang-pill">EN-IN <ChevronDown size={12} /></span></div><textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Editable transcript" /><div className="query-actions"><motion.button whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 22px #e4a75c66' }} className={`icon-button ${tts ? 'tts-on' : ''}`} aria-label="Drishti Voice Output" onClick={() => setTts(!tts)}>{tts ? <Volume2 size={16} /> : <Headphones size={16} />}</motion.button><motion.button whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 24px #e4a75c88' }} className="submit-button" onClick={runQuery} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{recording ? <><motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', lineHeight: 0 }}><Loader2 size={14} /></motion.span> Transcribing...</> : !complete ? <><motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', lineHeight: 0 }}><Loader2 size={14} /></motion.span> Running...</> : 'Run query ↗'}</motion.button></div><p className="hint"><CircleHelp size={13} /> {tts ? 'Drishti Voice Output enabled' : 'Voice output muted'}</p><div style={{ marginTop: '1.5rem', textAlign: 'left', zIndex: 10, paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}><p style={{ fontSize: '0.65rem', opacity: 0.8, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '10px', color: '#e4a75c' }}>Test the Database (Try asking):</p><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>{["दानेदार प्याज क्या है?", "एक टी-रेक्स का वजन कितना होता है?", "स्मज (Smudge) क्या है?", "What is granulated onion?", "How much does a T-Rex weigh?"].map((prompt, i) => (<button key={i} onClick={() => { setText(prompt); runQuery(prompt); }} style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(228,167,92,0.2)', padding: '6px 12px', borderRadius: '100px', fontSize: '0.75rem', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', transition: 'all 0.2s', textAlign: 'left' }} onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(228,167,92,0.1)'; e.currentTarget.style.color = '#f7d38b'; }} onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.03)'; e.currentTarget.style.color = 'rgba(255,255,255,0.7)'; }}>{prompt}</button>))}</div></div></motion.div></section>
+      <motion.div className="query-panel panel-glass" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .3 }}><div className="panel-heading"><div><p className="eyebrow">VOICE TRANSCRIPT / LIVE</p><h3>Shape your question</h3></div><span className="lang-pill">EN-IN <ChevronDown size={12} /></span></div><textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Editable transcript" /><div className="query-actions"><motion.button whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 22px #e4a75c66' }} className={`icon-button ${tts ? 'tts-on' : ''}`} aria-label="Drishti Voice Output" onClick={() => setTts(!tts)}>{tts ? <Volume2 size={16} /> : <Headphones size={16} />}</motion.button><motion.button whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 24px #e4a75c88' }} className="submit-button" onClick={runQuery} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>{recording ? <><motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', lineHeight: 0 }}><Loader2 size={14} /></motion.span> Transcribing...</> : !complete ? <><motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', lineHeight: 0 }}><Loader2 size={14} /></motion.span> Running...</> : 'Run query ↗'}</motion.button></div><p className="hint"><CircleHelp size={13} /> {tts ? 'Drishti Voice Output enabled' : 'Voice output muted'}</p><div style={{ marginTop: '1.5rem', textAlign: 'left', zIndex: 10, paddingTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.05)' }}><p style={{ fontSize: '0.65rem', opacity: 0.8, letterSpacing: '0.05em', textTransform: 'uppercase', marginBottom: '10px', color: '#e4a75c' }}>Test the Database (Try asking):</p><div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+            {suggestedQueries.map((query, i) => (
+              <button 
+                key={i} 
+                onClick={() => { setText(query.text); runQuery(query.text); }} 
+                style={{ 
+                  background: query.isGuardrail ? 'rgba(239, 68, 68, 0.05)' : 'rgba(255,255,255,0.03)', 
+                  border: query.isGuardrail ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(228,167,92,0.2)', 
+                  padding: '6px 12px', 
+                  borderRadius: '100px', 
+                  fontSize: '0.75rem', 
+                  color: query.isGuardrail ? '#fca5a5' : 'rgba(255,255,255,0.7)', 
+                  cursor: 'pointer', 
+                  transition: 'all 0.2s', 
+                  textAlign: 'left' 
+                }} 
+                onMouseEnter={(e) => { 
+                  e.currentTarget.style.background = query.isGuardrail ? 'rgba(239, 68, 68, 0.15)' : 'rgba(228,167,92,0.1)'; 
+                  e.currentTarget.style.color = query.isGuardrail ? '#fca5a5' : '#f7d38b'; 
+                }} 
+                onMouseLeave={(e) => { 
+                  e.currentTarget.style.background = query.isGuardrail ? 'rgba(239, 68, 68, 0.05)' : 'rgba(255,255,255,0.03)'; 
+                  e.currentTarget.style.color = query.isGuardrail ? '#fca5a5' : 'rgba(255,255,255,0.7)'; 
+                }}
+              >
+                {query.label}
+              </button>
+            ))}
+          </div></div></motion.div></section>
     <section style={{ display: 'flex', justifyContent: 'center', margin: '2rem auto', width: '100%', maxWidth: '1200px', padding: '0 2rem' }}><motion.article ref={answerRef} className="answer-card panel-glass" style={{ width: '100%' }}><div className="answer-top"><div><p className="eyebrow">GROUNDED RESPONSE</p><h3 style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>{complete ? 'Evidence-backed synthesis' : <><motion.span animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1, ease: "linear" }} style={{ display: 'inline-block', lineHeight: 0 }}><Loader2 size={18} /></motion.span> Working through the corpus...</>}</h3></div><div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: '4px' }}>{(answer.includes('UNANSWERABLE') || answer.includes('क्षमा करें')) ? (<motion.span className="confidence" animate={{ boxShadow: ['0 0 0px rgba(239, 68, 68, 0)', '0 0 15px rgba(239, 68, 68, 0.8)', '0 0 0px rgba(239, 68, 68, 0)'] }} transition={{ duration: 1.5, repeat: Infinity }} style={{ color: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.15)', borderColor: 'rgba(239, 68, 68, 0.4)', fontWeight: 'bold' }}><AlertTriangle size={15} /> GUARDRAIL TRIGGERED: OUT OF DOMAIN</motion.span>) : (<span className="confidence" style={{ color: '#34d399', backgroundColor: 'rgba(52, 211, 153, 0.1)', borderColor: 'rgba(52, 211, 153, 0.2)' }}><ShieldCheck size={15} /> HIGH CONFIDENCE: EVIDENCE-BACKED SYNTHESIS</span>)}{(answer.includes('UNANSWERABLE') || answer.includes('क्षमा करें')) && <motion.span animate={{ opacity: [0.5, 1, 0.5] }} transition={{ duration: 2, repeat: Infinity }} style={{ fontSize: '0.75rem', color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.03em', fontWeight: 'bold', marginTop: '2px' }}>System successfully prevented hallucination</motion.span>}</div></div><div style={{ display: 'flex', gap: '1rem', marginTop: '1rem', marginBottom: '1rem' }}><motion.div style={{ flex: 1, padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' }} animate={!complete ? { opacity: [0.4, 1, 0.4] } : { opacity: 1 }} transition={{ duration: 1.5, repeat: Infinity }}><h4 style={{ fontSize: '0.7rem', color: '#e4a75c', marginBottom: '0.5rem', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>हिंदी (Hindi)<button onClick={(e) => { e.preventDefault(); playAudio(hindiText, 'hi-IN'); }} style={{ background: 'transparent', border: 'none', color: '#e4a75c', cursor: 'pointer' }}><Volume2 size={14} /></button></h4><p style={{ fontSize: '1.05rem', lineHeight: '1.6', flex: 1, color: 'rgba(255,255,255,0.9)' }}>{hindiText}</p></motion.div><motion.div style={{ flex: 1, padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' }} animate={!complete ? { opacity: [0.4, 1, 0.4] } : { opacity: 1 }} transition={{ duration: 1.5, repeat: Infinity }}><h4 style={{ fontSize: '0.7rem', color: '#e4a75c', marginBottom: '0.5rem', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>English<button onClick={(e) => { e.preventDefault(); playAudio(englishText || answer, 'en-US'); }} style={{ background: 'transparent', border: 'none', color: '#e4a75c', cursor: 'pointer' }}><Volume2 size={14} /></button></h4><p style={{ fontSize: '0.95rem', lineHeight: '1.6', flex: 1, color: 'rgba(255,255,255,0.7)' }}>{englishText || (complete ? '' : 'Translating...')}</p></motion.div></div><div className="citation-row"><span><FileText size={14} /> {citationCount} citations</span><span><Activity size={14} /> {latencyMs} ms server pipeline</span><span><Sparkles size={14} /> {queryError ? 'backend unreachable' : 'guardrail passed'}</span></div></motion.article></section>
     <section className="workspace" style={{ alignItems: 'start' }}><div className="answer-column"><div className="section-label"><span>01</span><p>PIPELINE TRACE</p><span className="trace-id">TRACE / RAG-{String(run).padStart(4, '0')}</span></div><div className="timeline">{stages.map(([name, time, detail], i) => <div className={`stage ${complete || i === 0 ? 'done' : ''}`} key={name}><div className="stage-node">{complete ? '✓' : i + 1}</div><div><strong>{name}</strong><small>{detail}</small></div><time>{time}</time></div>)}</div><motion.section className="analytics panel-glass" style={{ marginTop: '2rem' }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }}><div className="analytics-heading"><div><p className="eyebrow">03 / OBSERVABILITY</p><h3>Latency stream</h3></div><div className="warm"><span className="live-dot" /> WARM INDEX · 48 SAMPLES</div></div><div className="stream-wrap"><div className="stream-line"><span className="stream-pulse" /></div>{['P50', 'P70', 'P100'].map((metric, i) => <button key={metric} className={`metric metric-${i}`} onMouseEnter={() => setHoverMetric(metric)}><strong>{metric}</strong><span>{metrics[i]} ms</span>{hoverMetric === metric && <i className="echo" />}</button>)}</div><div className="analytics-foot"><span>Validated request → serialized answer</span><span>Target <b>&lt; 200 ms</b> · P100 <b>{metrics[2]} ms</b> <span className="pass">{metrics[2] < 200 ? 'PASS' : 'WARN'}</span></span></div></motion.section></div>
       <aside className="evidence-column"><div className="section-label"><span>02</span><p>EVIDENCE SHARDS</p><motion.button whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 20px #e4a75c55' }} className="expand-button" onClick={() => setExpanded(!expanded)}>{expanded ? 'Collapse' : 'Expand drawer'} <ChevronDown size={14} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} /></motion.button></div><div className="evidence-drawer">{evidence.slice(0, expanded ? evidence.length : 1).map(([id, source, copy], i) => <motion.button className="shard" key={`${id}-${i}`} onClick={() => setExpanded(true)} animate={{ y: [0, -2, 0], opacity: 1 }} initial={{ opacity: 0 }} transition={{ duration: 4, repeat: Infinity, delay: i * .2 }} whileHover={{ scale: 1.02 }}><span className="shard-index">0{i + 1}</span><div className="shard-body"><div className="shard-meta"><strong>{id}</strong><span>{(0.94 - i * .06).toFixed(2)}</span></div><p>{copy}</p><div className="shard-tags"><span>semantic</span><span>en-IN</span><span>{source}</span></div></div></motion.button>)}{!expanded && evidence.length > 1 && <div style={{ textAlign: 'center', fontSize: '0.7rem', opacity: 0.5, marginTop: '8px', cursor: 'pointer' }} onClick={() => setExpanded(true)}>+ {evidence.length - 1} more shards</div>}</div></aside></section>
