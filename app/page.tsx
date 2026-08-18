@@ -3,6 +3,7 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion'
 import { Activity, ChevronDown, CircleHelp, FileText, Headphones, Mic, ShieldCheck, Sparkles, Square, Volume2, Zap, Loader2, AlertTriangle } from 'lucide-react'
+import { VectorCosmos } from '@/components/VectorCosmos'
 
 type EvidenceShard = { text: string; score?: number; source?: string; metadata?: { docId?: string; language?: string; strategy?: string } }
 type QueryResponse = { synthesized_answer: string; evidence_shards: (EvidenceShard | string)[]; latency_ms: number; citations_count?: number }
@@ -17,6 +18,122 @@ const defaultEvidence: DisplayShard[] = [
 const defaultStages: Stage[] = [['Transcribed', '00:42', 'Voice signal decoded'], ['Retrieved', '18 ms', '3 shards fused'], ['Grounded', '64 ms', 'Citation coverage 100%'], ['Answered', '112 ms', 'Confidence high']]
 const defaultMetrics = [78, 112, 196]
 
+// ── 3D COSMIC DEEP SPACE WARP BACKGROUND ────────────────────────────────────
+function SpaceBackground({ isWarping = false }: { isWarping?: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    let animId: number
+    let width = (canvas.width = window.innerWidth)
+    let height = (canvas.height = window.innerHeight)
+
+    const handleResize = () => {
+      if (!canvas) return
+      width = canvas.width = window.innerWidth
+      height = canvas.height = window.innerHeight
+    }
+    window.addEventListener('resize', handleResize)
+
+    // 220 3D Warp Stars
+    const numStars = 220
+    const stars = Array.from({ length: numStars }).map(() => ({
+      x: (Math.random() - 0.5) * width * 2,
+      y: (Math.random() - 0.5) * height * 2,
+      z: Math.random() * width,
+      size: Math.random() * 1.6 + 0.5,
+      speed: Math.random() * 1.8 + 0.8,
+      baseAlpha: Math.random() * 0.7 + 0.3,
+      color: Math.random() > 0.6 ? '#f59e0b' : Math.random() > 0.3 ? '#38bdf8' : '#ffffff'
+    }))
+
+    let nebulaPhase = 0
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height)
+      nebulaPhase += 0.003
+      const cx = width / 2
+      const cy = height / 2
+
+      // ── Cosmic Nebula Glow ──
+      const neb1 = ctx.createRadialGradient(cx * 0.7, cy * 0.8, 10, cx * 0.7, cy * 0.8, width * 0.45)
+      neb1.addColorStop(0, 'rgba(245, 158, 11, 0.045)')
+      neb1.addColorStop(0.5, 'rgba(234, 88, 12, 0.02)')
+      neb1.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = neb1
+      ctx.fillRect(0, 0, width, height)
+
+      const neb2 = ctx.createRadialGradient(cx * 1.3, cy * 1.1, 10, cx * 1.3, cy * 1.1, width * 0.4)
+      neb2.addColorStop(0, 'rgba(56, 189, 248, 0.035)')
+      neb2.addColorStop(0.6, 'rgba(168, 85, 247, 0.015)')
+      neb2.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = neb2
+      ctx.fillRect(0, 0, width, height)
+
+      // ── 3D Moving Stars (Warp Speed on query) ──
+      const speedMul = isWarping ? 5.5 : 1.0
+
+      stars.forEach((star) => {
+        star.z -= star.speed * speedMul
+        if (star.z <= 0) {
+          star.z = width
+          star.x = (Math.random() - 0.5) * width * 2
+          star.y = (Math.random() - 0.5) * height * 2
+        }
+
+        const k = 280 / star.z
+        const px = cx + star.x * k
+        const py = cy + star.y * k
+
+        if (px >= 0 && px <= width && py >= 0 && py <= height) {
+          const starAlpha = Math.min(1, Math.max(0.1, (1 - star.z / width) * star.baseAlpha))
+          ctx.fillStyle = star.color
+          ctx.globalAlpha = starAlpha
+
+          if (isWarping && star.z < width * 0.85) {
+            // Hyperdrive light streaks
+            const prevK = 280 / (star.z + star.speed * speedMul * 3.5)
+            const prevPx = cx + star.x * prevK
+            const prevPy = cy + star.y * prevK
+            ctx.strokeStyle = star.color
+            ctx.lineWidth = Math.max(0.8, star.size * k)
+            ctx.beginPath()
+            ctx.moveTo(prevPx, prevPy)
+            ctx.lineTo(px, py)
+            ctx.stroke()
+          } else {
+            ctx.beginPath()
+            ctx.arc(px, py, Math.max(0.6, star.size * k), 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
+      })
+      ctx.globalAlpha = 1
+
+      animId = requestAnimationFrame(render)
+    }
+
+    render()
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [isWarping])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-0"
+      style={{ width: '100vw', height: '100vh', opacity: 0.85 }}
+    />
+  )
+}
+
+// ── SIMPLE MIC WITH DYNAMIC AUDIO WAVEFORM VISUALIZER ON QUERY/RECORDING ─────
 function VoiceOrb({ isRecording, isThinking }: { isRecording: boolean; isThinking: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -26,81 +143,106 @@ function VoiceOrb({ isRecording, isThinking }: { isRecording: boolean; isThinkin
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const prefersReducedMotion = typeof window !== 'undefined' 
-      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches 
-      : false
-
     let animationFrameId: number
-    let phase = 0
+    let time = 0
+
+    const displayWidth = 320
+    const displayHeight = 160
+    const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 2, 2) : 2
+    canvas.width = displayWidth * dpr
+    canvas.height = displayHeight * dpr
+    ctx.scale(dpr, dpr)
+
+    const isAction = isRecording || isThinking
 
     const render = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      const cx = canvas.width / 2
-      const cy = canvas.height / 2
-      const baseRadius = isRecording ? 68 : 58
+      time += isRecording ? 0.06 : isThinking ? 0.045 : 0.015
+      ctx.clearRect(0, 0, displayWidth, displayHeight)
+      const cx = displayWidth / 2
+      const cy = displayHeight / 2
 
-      // Draw Glowing Aura
-      const gradient = ctx.createRadialGradient(cx, cy, baseRadius * 0.3, cx, cy, baseRadius * 1.4)
-      if (isRecording) {
-        gradient.addColorStop(0, 'rgba(234, 88, 12, 0.9)')   // Stark active marigold orange
-        gradient.addColorStop(0.5, 'rgba(245, 158, 11, 0.3)')
-        gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
-      } else if (isThinking) {
-        gradient.addColorStop(0, 'rgba(245, 158, 11, 0.6)')   // Golden amber thinking
-        gradient.addColorStop(0.6, 'rgba(217, 119, 6, 0.2)')
-        gradient.addColorStop(1, 'rgba(217, 119, 6, 0)')
-      } else {
-        gradient.addColorStop(0, 'rgba(245, 158, 11, 0.25)')  // Warm breathing idle
-        gradient.addColorStop(0.7, 'rgba(245, 158, 11, 0.05)')
-        gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
-      }
+      // ── WAVE ACTIONS (Only render dynamic soundwaves when Querying or Recording) ──
+      if (isAction) {
+        // Draw 5 glowing sinusoidal audio waveform ribbons across the button
+        const numWaves = 5
+        const waveColors = ['#fde047', '#fbbf24', '#f59e0b', '#f97316', '#ea580c']
 
-      ctx.fillStyle = gradient
-      ctx.beginPath()
-      ctx.arc(cx, cy, baseRadius * 1.4, 0, Math.PI * 2)
-      ctx.fill()
+        for (let w = 0; w < numWaves; w++) {
+          const wavePhase = time * (w % 2 === 0 ? 3.2 : -2.8) + (w * Math.PI) / 3
+          const baseAmp = isRecording ? 28 + w * 6 : 18 + w * 4
+          const freq = 0.025 + w * 0.006
 
-      if (isThinking) {
-        // Thinking spinner
-        ctx.strokeStyle = '#f59e0b'
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.arc(cx, cy, baseRadius, phase, phase + Math.PI * 1.5)
-        ctx.stroke()
+          ctx.beginPath()
+          const steps = 160
+          for (let i = 0; i <= steps; i++) {
+            const x = (i / steps) * displayWidth
+            // Envelope: bell-curve windowing so waves taper nicely at edges
+            const envelope = Math.sin((i / steps) * Math.PI)
+            const y = cy + Math.sin(x * freq + wavePhase) * (baseAmp * envelope) * Math.cos(time * 1.5 + w)
 
-        ctx.strokeStyle = '#ea580c'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.arc(cx, cy, baseRadius - 6, -phase, -phase + Math.PI * 1.2)
-        ctx.stroke()
-      } else {
-        // Fluid displacement blob
-        ctx.beginPath()
-        const points = 120
-        for (let i = 0; i < points; i++) {
-          const angle = (i / points) * Math.PI * 2
-          let waveOffset = 0
-          
-          if (!prefersReducedMotion) {
-            waveOffset = Math.sin(angle * 6 + phase) * (isRecording ? 10 : 3.5) +
-                         Math.cos(angle * 3 - phase * 1.4) * (isRecording ? 5 : 1.5)
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
           }
 
-          const r = baseRadius + waveOffset
-          const x = cx + Math.cos(angle) * r
-          const y = cy + Math.sin(angle) * r
-          if (i === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
+          ctx.strokeStyle = waveColors[w]
+          ctx.lineWidth = w === 0 ? 2.5 : 1.5
+          ctx.globalAlpha = 0.85 - w * 0.12
+          ctx.shadowColor = waveColors[w]
+          ctx.shadowBlur = isRecording ? 16 : 10
+          ctx.stroke()
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = 1
         }
-        ctx.closePath()
-        ctx.fillStyle = isRecording ? '#ea580c' : '#f59e0b'
-        ctx.fill()
+
+        // Concentric acoustic pulse rings
+        for (let p = 0; p < 3; p++) {
+          const progress = ((time * 0.7 + p / 3) % 1)
+          const pr = 42 + progress * 55
+          const pAlpha = Math.max(0, (1 - progress) * (isRecording ? 0.7 : 0.4))
+          ctx.strokeStyle = isRecording ? `rgba(234, 88, 12, ${pAlpha})` : `rgba(245, 158, 11, ${pAlpha})`
+          ctx.lineWidth = 1.4
+          ctx.beginPath()
+          ctx.arc(cx, cy, pr, 0, Math.PI * 2)
+          ctx.stroke()
+        }
       }
 
-      if (!prefersReducedMotion) {
-        phase += isRecording ? 0.09 : 0.02
-        animationFrameId = requestAnimationFrame(render)
+      // ── SIMPLE AMBIENT BREATHING GLOW BEHIND MIC ──
+      const glowR = isAction ? 56 : 48
+      const aura = ctx.createRadialGradient(cx, cy, 2, cx, cy, glowR)
+      if (isRecording) {
+        aura.addColorStop(0, 'rgba(234, 88, 12, 0.55)')
+        aura.addColorStop(0.6, 'rgba(245, 158, 11, 0.2)')
+        aura.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      } else if (isThinking) {
+        aura.addColorStop(0, 'rgba(251, 191, 36, 0.45)')
+        aura.addColorStop(0.6, 'rgba(217, 119, 6, 0.15)')
+        aura.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      } else {
+        const pulse = Math.sin(time * 1.5) * 0.05
+        aura.addColorStop(0, `rgba(245, 158, 11, ${0.35 + pulse})`)
+        aura.addColorStop(0.7, `rgba(245, 158, 11, ${0.08 + pulse * 0.5})`)
+        aura.addColorStop(1, 'rgba(0, 0, 0, 0)')
       }
+
+      ctx.fillStyle = aura
+      ctx.beginPath()
+      ctx.arc(cx, cy, glowR, 0, Math.PI * 2)
+      ctx.fill()
+
+      // Outer sleek border ring
+      ctx.strokeStyle = isRecording ? '#ea580c' : '#f59e0b'
+      ctx.lineWidth = isAction ? 2 : 1.4
+      ctx.globalAlpha = isAction ? 0.9 : 0.6
+      ctx.shadowColor = ctx.strokeStyle
+      ctx.shadowBlur = isAction ? 14 : 6
+      ctx.beginPath()
+      ctx.arc(cx, cy, 40, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = 1
+
+      animationFrameId = requestAnimationFrame(render)
     }
 
     render()
@@ -110,8 +252,8 @@ function VoiceOrb({ isRecording, isThinking }: { isRecording: boolean; isThinkin
   }, [isRecording, isThinking])
 
   return (
-    <div className="relative flex items-center justify-center w-48 h-48">
-      <canvas ref={canvasRef} width={200} height={200} className="w-full h-full" />
+    <div className="relative flex items-center justify-center select-none pointer-events-none" style={{ width: '320px', height: '160px' }}>
+      <canvas ref={canvasRef} style={{ width: '320px', height: '160px' }} className="block" />
     </div>
   )
 }
@@ -417,125 +559,194 @@ export default function Page() {
 
   const silenceTimerRef = useRef<NodeJS.Timeout | null>(null)
   const speechDetectedRef = useRef<boolean>(false)
+  const recognitionRef = useRef<any>(null)
+  const transcriptBufferRef = useRef<string>('')
 
   function begin() { if (booting) return; setBooting(true); setTimeout(() => setInitialized(true), 1500); setTimeout(() => setBooting(false), 2400) }
 
   async function startRecording() {
     try {
-      speechDetectedRef.current = false;
+      speechDetectedRef.current = false
+      transcriptBufferRef.current = ''
       if (silenceTimerRef.current) {
-        clearTimeout(silenceTimerRef.current);
-        silenceTimerRef.current = null;
+        clearTimeout(silenceTimerRef.current)
+        silenceTimerRef.current = null
       }
 
+      setRecording(true)
+      setComplete(false)
+      setStatus('Listening · speak your question...')
+
+      const SpeechRecognition = typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null
+
+      if (SpeechRecognition) {
+        try {
+          const rec = new SpeechRecognition()
+          recognitionRef.current = rec
+          rec.continuous = false
+          rec.interimResults = true
+          rec.lang = 'en-IN'
+
+          let finalTrans = ''
+
+          rec.onresult = (event: any) => {
+            let current = ''
+            for (let i = 0; i < event.results.length; i++) {
+              current += event.results[i][0].transcript
+            }
+            if (current.trim()) {
+              finalTrans = current
+              transcriptBufferRef.current = current
+              setText(current)
+              speechDetectedRef.current = true
+
+              // Reset silence auto-submit timer (1.2s after last detected word)
+              if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+              silenceTimerRef.current = setTimeout(() => {
+                console.log("Silence threshold reached after speech. Auto-submitting...");
+                stopRecording()
+              }, 1200)
+            }
+          }
+
+          rec.onspeechend = () => {
+            console.log("Speech ended detected by browser engine.")
+            setTimeout(() => {
+              stopRecording()
+            }, 400)
+          }
+
+          rec.onend = () => {
+            setRecording(false)
+            if (silenceTimerRef.current) {
+              clearTimeout(silenceTimerRef.current)
+              silenceTimerRef.current = null
+            }
+            const queryToRun = transcriptBufferRef.current.trim() || finalTrans.trim()
+            if (queryToRun) {
+              setStatus('Query received · synthesizing...')
+              runQuery(queryToRun)
+            } else {
+              setStatus('Ready for a voice query')
+              setComplete(true)
+            }
+          }
+
+          rec.onerror = (err: any) => {
+            console.warn("SpeechRecognition error, falling back to Sarvam STT", err)
+            if (!speechDetectedRef.current) {
+              startSarvamRecording()
+            } else {
+              stopRecording()
+            }
+          }
+
+          rec.start()
+          return
+        } catch (e) {
+          console.warn("SpeechRecognition start failed, trying Sarvam WebSocket", e)
+          startSarvamRecording()
+        }
+      } else {
+        startSarvamRecording()
+      }
+    } catch (err) {
+      console.error("Microphone start error", err)
+      setStatus('Microphone access denied or not supported')
+      setRecording(false)
+      setComplete(true)
+    }
+  }
+
+  async function startSarvamRecording() {
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream;
+      streamRef.current = stream
 
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext
+      const audioContext = new AudioContext({ sampleRate: 16000 })
+      audioContextRef.current = audioContext
 
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      scriptProcessorRef.current = processor;
+      const source = audioContext.createMediaStreamSource(stream)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1)
+      scriptProcessorRef.current = processor
 
-      const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "";
-      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`;
-      const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`]);
-      wsRef.current = ws;
+      const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "sk_27896hlg_nOnuU6mFkY8nr2jbJc9gJFLA"
+      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`
+      const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`])
+      wsRef.current = ws
 
-      let currentTranscript = '';
-      let connectionFailed = false;
+      let currentTranscript = ''
 
-      const resetSilenceTimer = () => {
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      const resetSarvamSilenceTimer = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
         if (speechDetectedRef.current) {
           silenceTimerRef.current = setTimeout(() => {
-            console.log("Silence threshold (1800ms) reached after speech. Endpointing recording...");
-            stopRecording();
-          }, 1800);
+            console.log("Sarvam silence threshold reached. Auto-endpointing...")
+            stopRecording()
+          }, 1400)
         }
-      };
+      }
 
       ws.onopen = () => {
         setRecording(true)
         setComplete(false)
         setStatus('Recording · speak naturally')
-        setText('')
-      };
+      }
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          if (data.type === "data" && data.data && data.data.transcript) {
-            currentTranscript = data.data.transcript;
-            setText(currentTranscript);
-            if (currentTranscript.trim().length > 0) {
-              speechDetectedRef.current = true;
-              resetSilenceTimer();
-            }
-            if (finalizingRef.current) {
-              finalizingRef.current = false;
-              try { ws.close() } catch (e) { }
-            }
-          } else if (data.type === "error") {
-            console.error("Sarvam STT error", data);
-            setStatus(data.data?.message || 'Sarvam STT error');
+          const data = JSON.parse(event.data)
+          const receivedText = data.data?.transcript || data.transcript || data.text
+          if (receivedText) {
+            currentTranscript = receivedText
+            transcriptBufferRef.current = receivedText
+            setText(receivedText)
+            speechDetectedRef.current = true
+            resetSarvamSilenceTimer()
           }
         } catch (e) { }
-      };
+      }
 
       ws.onclose = () => {
+        setRecording(false)
         if (silenceTimerRef.current) {
-          clearTimeout(silenceTimerRef.current);
-          silenceTimerRef.current = null;
+          clearTimeout(silenceTimerRef.current)
+          silenceTimerRef.current = null
         }
-        setRecording(false);
-        if (connectionFailed) {
-          setStatus('WebSocket connection failed');
-          setComplete(true);
-          return;
-        }
-        setStatus('Processing speech...');
-        if (currentTranscript.trim()) {
-          runQuery(currentTranscript.trim());
+        const queryToRun = transcriptBufferRef.current.trim() || currentTranscript.trim()
+        if (queryToRun) {
+          setStatus('Processing speech...')
+          runQuery(queryToRun)
         } else {
-          setStatus('Ready for a voice query');
-          setComplete(true);
+          setStatus('Ready for a voice query')
+          setComplete(true)
         }
-      };
-
-      ws.onerror = (e) => {
-        console.error("WebSocket error", e);
-        connectionFailed = true;
-        setStatus('WebSocket connection failed');
-      };
+      }
 
       processor.onaudioprocess = (e) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        const inputData = e.inputBuffer.getChannelData(0);
+        if (!ws || ws.readyState !== WebSocket.OPEN) return
+        const inputData = e.inputBuffer.getChannelData(0)
 
-        let sum = 0;
+        let sum = 0
+        for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i]
+        const rms = Math.sqrt(sum / inputData.length)
+        if (rms > 0.015) {
+          speechDetectedRef.current = true
+          resetSarvamSilenceTimer()
+        }
+
+        const pcmData = new Int16Array(inputData.length)
         for (let i = 0; i < inputData.length; i++) {
-          sum += inputData[i] * inputData[i];
-        }
-        const rms = Math.sqrt(sum / inputData.length);
-        if (rms > 0.012) {
-          speechDetectedRef.current = true;
-          resetSilenceTimer();
+          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF
         }
 
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
-        }
-
-        let binary = '';
-        const bytes = new Uint8Array(pcmData.buffer);
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
-        }
-        const base64Audio = btoa(binary);
+        let binary = ''
+        const bytes = new Uint8Array(pcmData.buffer)
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+        const base64Audio = btoa(binary)
 
         ws.send(JSON.stringify({
           audio: {
@@ -544,54 +755,61 @@ export default function Page() {
             encoding: "audio/wav",
             language_code: "hi-IN"
           }
-        }));
-      };
+        }))
+      }
 
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = 0;
-      source.connect(processor);
-      processor.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+      const gainNode = audioContext.createGain()
+      gainNode.gain.value = 0
+      source.connect(processor)
+      processor.connect(gainNode)
+      gainNode.connect(audioContext.destination)
 
     } catch (err) {
-      console.error("Microphone access error", err)
-      setStatus('Microphone access denied or not supported')
+      console.error("Sarvam STT failed", err)
+      setStatus('Ready for a voice query')
+      setRecording(false)
+      setComplete(true)
     }
   }
 
   function stopRecording() {
     if (silenceTimerRef.current) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
     }
-    speechDetectedRef.current = false;
 
-    const ws = wsRef.current;
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch (e) { }
+      recognitionRef.current = null
+    }
 
     if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
+      try { scriptProcessorRef.current.disconnect() } catch (e) { }
+      scriptProcessorRef.current = null
     }
     if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+      try { audioContextRef.current.close() } catch (e) { }
+      audioContextRef.current = null
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
+      try { streamRef.current.getTracks().forEach(track => track.stop()) } catch (e) { }
+      streamRef.current = null
     }
-    setRecording(false);
 
+    setRecording(false)
+
+    const ws = wsRef.current
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) {
-        finalizingRef.current = true;
+        finalizingRef.current = true
         try { ws.send(JSON.stringify({ type: 'flush' })) } catch (e) { }
-        setStatus('Finalizing transcript…');
-        setTimeout(() => { try { ws.close() } catch (e) { } }, 1500);
+        setTimeout(() => { try { ws.close() } catch (e) { } }, 800)
       } else {
         try { ws.close() } catch (e) { }
       }
-      wsRef.current = null;
+      wsRef.current = null
     }
   }
 
@@ -713,26 +931,32 @@ export default function Page() {
   )
 
   const voiceOrbSection = (
-    <div className="flex flex-col items-center justify-center min-h-[270px] relative">
-      <Magnetic>
-        <motion.button 
-          whileTap={{ scale: 0.95 }}
-          onClick={recording ? stopRecording : startRecording}
-          className="relative flex items-center justify-center cursor-pointer bg-transparent border-0 outline-none p-0 z-10"
-          style={{ width: '192px', height: '192px' }}
-          aria-label="Toggle recording"
-        >
+    <div className="flex flex-col items-center justify-center min-h-[220px] relative my-1">
+      <div className="relative flex items-center justify-center">
+        {/* Wave Visualizer Canvas behind / around the mic */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
           <VoiceOrb isRecording={recording} isThinking={!complete} />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white z-20">
+        </div>
+
+        {/* Simple, sleek, minimal Mic Button */}
+        <Magnetic>
+          <motion.button 
+            whileTap={{ scale: 0.92 }}
+            whileHover={{ scale: 1.08 }}
+            onClick={recording ? stopRecording : startRecording}
+            className="relative flex items-center justify-center cursor-pointer bg-slate-950/80 hover:bg-slate-900/90 border border-amber-500/40 hover:border-amber-400/80 rounded-full shadow-[0_0_20px_rgba(245,158,11,0.25)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] transition-all z-10 p-0"
+            style={{ width: '80px', height: '80px' }}
+            aria-label="Toggle recording"
+          >
             {recording ? (
-              <Square size={28} fill="currentColor" className="text-orange-600 animate-pulse" />
+              <Square size={24} fill="#ea580c" className="text-orange-500 drop-shadow-[0_0_12px_#ea580c] animate-pulse" />
             ) : (
-              <Mic size={32} className="text-amber-500" />
+              <Mic size={30} className="text-amber-400 drop-shadow-[0_0_10px_#f59e0b]" />
             )}
-          </div>
-        </motion.button>
-      </Magnetic>
-      <p className="core-status" style={{ position: 'absolute', bottom: 0 }}><span className="signal" />{status}</p>
+          </motion.button>
+        </Magnetic>
+      </div>
+      <p className="core-status" style={{ position: 'relative', marginTop: '1.25rem' }}><span className="signal" />{status}</p>
     </div>
   )
 
@@ -978,6 +1202,7 @@ export default function Page() {
 
   return (
     <motion.main className={`voice-shell dashboard-enter ${booting ? 'booting' : ''}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .8 }}>
+      <SpaceBackground isWarping={!complete || recording} />
       <div className="ambient-void" aria-hidden="true"><span>01</span><i /><i /><i /></div>
       
       {headerSection}
@@ -1005,8 +1230,9 @@ export default function Page() {
           )}
         </div>
 
-        {/* Right Column: Bento evidence cards grid */}
-        <div className="lg:col-span-5 w-full">
+        {/* Right Column: 3D Vector Cosmos + Bento evidence cards */}
+        <div className="lg:col-span-5 flex flex-col gap-6 w-full">
+          <VectorCosmos evidence={evidence} isSearching={!complete} />
           {workspaceEvidenceSection}
         </div>
       </div>
