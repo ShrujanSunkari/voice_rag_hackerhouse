@@ -61,7 +61,7 @@ class QueryRequest(BaseModel):
 
 class SynthesisRequest(BaseModel):
     transcript: str
-    evidence_shards: list[str]
+    evidence_shards: list[str | dict]  # accepts both plain strings and {text, score, source} dicts
 
 class QueryResponse(BaseModel):
     synthesized_answer: str
@@ -249,13 +249,39 @@ def process_retrieve(request: QueryRequest):
     
     evidence_shards_fast = []
     fast_answer = ""
+
+    # KNOWN LIMITATION — FAST-PATH GUARDRAIL SCOPE:
+    # This threshold (score < 0.45) catches only hard out-of-domain queries
+    # (e.g. completely foreign-language or empty queries). It does NOT reliably
+    # catch "topically adjacent but unanswerable" queries — e.g. a query about
+    # "Bolivar, TN" will retrieve a sports passage with cosine score ~0.77,
+    # which clears this threshold even though the content doesn't answer the query.
+    #
+    # Empirical data (18-Aug-2026): the 6 known-unanswerable queries from the
+    # 40-query validation all returned top-1 cosine scores between 0.72-0.79,
+    # well above 0.45. Both a higher cosine threshold and a secondary Jaccard
+    # lexical-overlap check were evaluated and found to produce unacceptable
+    # false-refusal rates on genuinely answerable queries (score/Jaccard
+    # distributions overlap heavily between the two groups).
+    #
+    # MITIGATION: The fast path is an *intermediate* result only. The polished
+    # LLM path (/api/synthesize) runs immediately after and correctly identifies
+    # these as UNANSWERABLE, replacing the fast answer in the frontend within
+    # the full pipeline latency window (~1-3s). The fast answer is explicitly
+    # labelled "FAST EXTRACTIVE PATH" in the UI to signal it is unverified.
+    #
+    # FIX CANDIDATE: A BM25 or TF-IDF re-ranker layer at retrieval time would
+    # provide reliable keyword-level relevance on top of semantic score, but
+    # requires indexing infrastructure changes (out of scope for this submission).
     if not search_result_fast or search_result_fast[0].score < 0.45:
         fast_answer = "HINDI: क्षमा करें, मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली।\nENGLISH: UNANSWERABLE: Sorry, I couldn't find enough information on this topic."
     else:
-        evidence_shards_fast = [hit.payload.get("text", "") for hit in search_result_fast]
-        # Just use the raw top chunk to be instantly fast without any overlap calculations
-        top_chunk = evidence_shards_fast[0]
-        fast_answer = f"HINDI: {top_chunk}\nENGLISH: [Extractive Fast Answer]"
+        evidence_shards_fast = [
+            {"text": hit.payload.get("text", ""), "score": round(hit.score, 4), "source": hit.payload.get("source", "")}
+            for hit in search_result_fast
+        ]
+        top_chunk = evidence_shards_fast[0]["text"]
+        fast_answer = f"HINDI: {top_chunk}"
 
     return {
         "type": "fast_answer",
@@ -292,10 +318,17 @@ def process_synthesize(request: SynthesisRequest):
         polished_answer = "HINDI: क्षमा करें, मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली।\nENGLISH: UNANSWERABLE: Sorry, I couldn't find enough information on this topic."
         model_used = "none"
         is_degraded = False
-        evidence_shards = request.evidence_shards
+        # Normalise: shards may be plain strings or {text, score, source} dicts
+        evidence_shards = [
+            s if isinstance(s, dict) else {"text": s, "score": 0, "source": ""}
+            for s in request.evidence_shards
+        ]
     else:
-        evidence_shards = [hit.payload.get("text", "") for hit in search_result]
-        context_text = "\n\n".join(evidence_shards)
+        evidence_shards = [
+            {"text": hit.payload.get("text", ""), "score": round(hit.score, 4), "source": hit.payload.get("source", "")}
+            for hit in search_result
+        ]
+        context_text = "\n\n".join(s["text"] for s in evidence_shards)
         try:
             rag_res, model_used, is_degraded = groq_generate_answer(context_text, request.transcript)
             polished_answer = rag_res.synthesized_answer

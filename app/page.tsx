@@ -4,15 +4,15 @@ import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion'
 import { Activity, ChevronDown, CircleHelp, FileText, Headphones, Mic, ShieldCheck, Sparkles, Square, Volume2, Zap, Loader2, AlertTriangle } from 'lucide-react'
 
-type EvidenceShard = { text: string; metadata?: { docId?: string; language?: string; strategy?: string } }
+type EvidenceShard = { text: string; score?: number; source?: string; metadata?: { docId?: string; language?: string; strategy?: string } }
 type QueryResponse = { synthesized_answer: string; evidence_shards: (EvidenceShard | string)[]; latency_ms: number; citations_count?: number }
-type DisplayShard = [id: string, source: string, copy: string]
+type DisplayShard = [id: string, source: string, copy: string, score: number]
 type Stage = [name: string, time: string, detail: string]
 
 const defaultEvidence: DisplayShard[] = [
-  ['SHARD-04', 'FIELD NOTES / goa-026', 'The signal resolves when fragmented observations are aligned into a single, traceable account.'],
-  ['SHARD-11', 'FIELD NOTES / task-02', 'A grounded answer carries its evidence forward, keeping the path visible.'],
-  ['SHARD-07', 'DRISHTI INDEX / warm-run', 'Warm index latency is measured from request receipt through grounded serialization.'],
+  ['SHARD-04', 'FIELD NOTES / goa-026', 'The signal resolves when fragmented observations are aligned into a single, traceable account.', 0],
+  ['SHARD-11', 'FIELD NOTES / task-02', 'A grounded answer carries its evidence forward, keeping the path visible.', 0],
+  ['SHARD-07', 'DRISHTI INDEX / warm-run', 'Warm index latency is measured from request receipt through grounded serialization.', 0],
 ]
 const defaultStages: Stage[] = [['Transcribed', '00:42', 'Voice signal decoded'], ['Retrieved', '18 ms', '3 shards fused'], ['Grounded', '64 ms', 'Citation coverage 100%'], ['Answered', '112 ms', 'Confidence high']]
 const defaultMetrics = [78, 112, 196]
@@ -237,12 +237,13 @@ function BentoCard({ id, score, text, source, index }: { id: string; score: numb
 function mapEvidenceShards(shards: (EvidenceShard | string)[]): DisplayShard[] {
   return shards.map((shard, i) => {
     if (typeof shard === 'string') {
-      return [`SHARD-${String(i + 1).padStart(2, '0')}`, 'QDRANT / ECHO-SIGHT', shard]
+      return [`SHARD-${String(i + 1).padStart(2, '0')}`, 'QDRANT / ECHO-SIGHT', shard, 0] as DisplayShard
     }
     const meta = shard.metadata ?? {}
     const id = meta.docId ? `SHARD-${String(meta.docId).toUpperCase()}` : `SHARD-${String(i + 1).padStart(2, '0')}`
-    const source = [meta.strategy, meta.docId].filter(Boolean).join(' / ').toUpperCase() || 'CORPUS'
-    return [id, source, shard.text]
+    const source = shard.source ? shard.source.toUpperCase() : ([meta.strategy, meta.docId].filter(Boolean).join(' / ').toUpperCase() || 'CORPUS')
+    const score = shard.score ?? 0
+    return [id, source, shard.text, score] as DisplayShard
   })
 }
 
@@ -764,7 +765,7 @@ export default function Page() {
               हिंदी (Hindi)
               <button onClick={(e) => { e.preventDefault(); playAudio(hindiText, 'hi-IN'); }} style={{ background: 'transparent', border: 'none', color: '#f59e0b', cursor: 'pointer' }}><Volume2 size={14} /></button>
             </h4>
-            <p style={{ fontSize: '1.05rem', lineHeight: '1.6', flex: 1, color: 'rgba(255,255,255,0.9)' }}>{hindiText}</p>
+            <p style={{ fontSize: '1.05rem', lineHeight: '1.6', flex: 1, color: answerType === 'fast' && !complete ? 'rgba(245,158,11,0.75)' : 'rgba(255,255,255,0.9)', transition: 'color 0.5s ease' }}>{hindiText}</p>
           </motion.div>
           <motion.div style={{ flex: 1, padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' }} animate={!complete ? { opacity: [0.4, 1, 0.4] } : { opacity: 1 }} transition={{ duration: 1.5, repeat: Infinity }}>
             <h4 style={{ fontSize: '0.7rem', color: '#f59e0b', marginBottom: '0.5rem', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -793,7 +794,7 @@ export default function Page() {
               <span>{(latencyMs / 1000).toFixed(1)}s</span>
             )}
           </span>
-          <span><Sparkles size={14} /> {queryError ? 'backend unreachable' : 'guardrail passed'}</span>
+          <span><Sparkles size={14} /> {queryError ? 'backend unreachable' : answerType === 'fast' && !complete ? 'fast path · unverified' : 'guardrail passed'}</span>
         </div>
       </motion.article>
     </section>
@@ -869,11 +870,11 @@ export default function Page() {
         animate="visible"
       >
         <AnimatePresence mode="popLayout">
-          {evidence.map(([id, source, copy], i) => (
+          {evidence.map(([id, source, copy, score], i) => (
             <BentoCard 
               key={`${id}-${i}`} 
               id={id} 
-              score={0.94 - (i * 0.06)} 
+              score={score ?? 0} 
               text={copy} 
               source={source} 
               index={i} 
