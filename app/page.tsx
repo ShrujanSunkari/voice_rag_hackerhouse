@@ -287,6 +287,7 @@ export default function Page() {
   const [showTelemetry, setShowTelemetry] = useState(false)
   const [sampleSize, setSampleSize] = useState(100)
   const [answerType, setAnswerType] = useState<'fast' | 'polished'>('polished')
+  const [llmLatencyMs, setLlmLatencyMs] = useState<number | null>(null)
   const latencyHistoryRef = useRef<number[]>([])
 
   useEffect(() => {
@@ -317,10 +318,20 @@ export default function Page() {
     setSampleSize(sorted.length);
   };
 
-  const hindiMatch = answer.match(/HINDI:[\s]*(([\s\S]+?)(?=\nENGLISH:|$))/i);
-  const englishMatch = answer.match(/ENGLISH:[\s]*([\s\S]+?)$/i);
-  const hindiText = hindiMatch ? hindiMatch[1].trim() : (englishMatch ? '' : answer);
-  const englishText = englishMatch ? englishMatch[1].trim() : '';;
+  const hMatch = answer.match(/HINDI:\s*([\s\S]*?)(?=\n\s*ENGLISH:|$)/i);
+  const eMatch = answer.match(/ENGLISH:\s*([\s\S]*?)(?=\n\s*HINDI:|$)/i);
+
+  let hindiText = hMatch && hMatch[1].trim() ? hMatch[1].trim() : '';
+  let englishText = eMatch && eMatch[1].trim() ? eMatch[1].trim() : '';
+
+  if (!hindiText && !englishText) {
+    hindiText = answer.trim();
+    englishText = answer.trim();
+  } else if (!englishText) {
+    englishText = hindiText;
+  } else if (!hindiText) {
+    hindiText = englishText;
+  }
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -333,11 +344,21 @@ export default function Page() {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
 
+      if (!text || !text.trim()) {
+        console.warn("TTS invocation skipped: text payload is empty.", { lang });
+        return;
+      }
+
       const cleanText = text
         .replace(/[\*\#\_\[\]\(\)\-\_]/g, ' ')
         .replace(/[\r\n]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+
+      if (!cleanText) {
+        console.warn("TTS invocation skipped: text cleaned to empty string.", { original: text, lang });
+        return;
+      }
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.rate = 1.0;
@@ -394,10 +415,19 @@ export default function Page() {
 
 
 
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const speechDetectedRef = useRef<boolean>(false)
+
   function begin() { if (booting) return; setBooting(true); setTimeout(() => setInitialized(true), 1500); setTimeout(() => setBooting(false), 2400) }
 
   async function startRecording() {
     try {
+      speechDetectedRef.current = false;
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = null;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       streamRef.current = stream;
 
@@ -410,12 +440,22 @@ export default function Page() {
       scriptProcessorRef.current = processor;
 
       const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "";
-      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=true&vad_signals=true&flush_signal=true`;
+      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`;
       const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`]);
       wsRef.current = ws;
 
       let currentTranscript = '';
       let connectionFailed = false;
+
+      const resetSilenceTimer = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        if (speechDetectedRef.current) {
+          silenceTimerRef.current = setTimeout(() => {
+            console.log("Silence threshold (1800ms) reached after speech. Endpointing recording...");
+            stopRecording();
+          }, 1800);
+        }
+      };
 
       ws.onopen = () => {
         setRecording(true)
@@ -430,6 +470,10 @@ export default function Page() {
           if (data.type === "data" && data.data && data.data.transcript) {
             currentTranscript = data.data.transcript;
             setText(currentTranscript);
+            if (currentTranscript.trim().length > 0) {
+              speechDetectedRef.current = true;
+              resetSilenceTimer();
+            }
             if (finalizingRef.current) {
               finalizingRef.current = false;
               try { ws.close() } catch (e) { }
@@ -442,6 +486,10 @@ export default function Page() {
       };
 
       ws.onclose = () => {
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current);
+          silenceTimerRef.current = null;
+        }
         setRecording(false);
         if (connectionFailed) {
           setStatus('WebSocket connection failed');
@@ -466,6 +514,17 @@ export default function Page() {
       processor.onaudioprocess = (e) => {
         if (!ws || ws.readyState !== WebSocket.OPEN) return;
         const inputData = e.inputBuffer.getChannelData(0);
+
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+          sum += inputData[i] * inputData[i];
+        }
+        const rms = Math.sqrt(sum / inputData.length);
+        if (rms > 0.012) {
+          speechDetectedRef.current = true;
+          resetSilenceTimer();
+        }
+
         const pcmData = new Int16Array(inputData.length);
         for (let i = 0; i < inputData.length; i++) {
           pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
@@ -501,6 +560,12 @@ export default function Page() {
   }
 
   function stopRecording() {
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    speechDetectedRef.current = false;
+
     const ws = wsRef.current;
 
     if (scriptProcessorRef.current) {
@@ -544,6 +609,7 @@ export default function Page() {
     setRun((r) => r + 1)
     setAnswer('Working through the corpus…')
     setAnswerType('fast')
+    setLlmLatencyMs(null)
     ;(window as any).__queryStart = performance.now()
 
     let retrievedShards: string[] = []
@@ -573,6 +639,7 @@ export default function Page() {
       setCitationCount(citations)
       setStages(buildStages(latency, shards.length))
       setAnswerType('fast')
+      updateLiveMetrics(latency)
       setStatus('Fast answer generated · Waiting for polished LLM response...')
 
     } catch (err) {
@@ -600,14 +667,15 @@ export default function Page() {
       const data = await res.json()
       const shards = mapEvidenceShards(data.evidence_shards ?? [])
       const citations = data.citations_count ?? shards.length
+      const fullLatency = Math.round(data.latency_ms || (performance.now() - ((window as any).__queryStart || performance.now())))
 
       setAnswer(data.synthesized_answer)
       setEvidence(shards.length ? shards : defaultEvidence)
       setCitationCount(citations)
+      setLlmLatencyMs(fullLatency)
       setAnswerType('polished')
       setComplete(true)
       setStatus('Answer grounded · ready to inspect')
-      updateLiveMetrics(Math.round((performance.now() - (window as any).__queryStart || latencyMs)))
 
     } catch (err) {
       console.error("Synthesis failed", err)
@@ -794,6 +862,19 @@ export default function Page() {
               <span>{(latencyMs / 1000).toFixed(1)}s</span>
             )}
           </span>
+          {llmLatencyMs !== null && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Sparkles size={14} style={{ color: '#34d399' }} />
+              <span style={{ color: '#f59e0b', fontWeight: 600 }}>Enhanced Duration:</span>
+              <motion.span
+                animate={{ textShadow: ['0 0 8px #34d399', '0 0 20px #34d399', '0 0 8px #34d399'] }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+                style={{ color: '#34d399', fontWeight: 700, fontSize: '1.05em' }}
+              >
+                {llmLatencyMs >= 1000 ? `${(llmLatencyMs / 1000).toFixed(1)}s` : `${llmLatencyMs} ms`} ✨
+              </motion.span>
+            </span>
+          )}
           <span><Sparkles size={14} /> {queryError ? 'backend unreachable' : answerType === 'fast' && !complete ? 'fast path · unverified' : 'guardrail passed'}</span>
         </div>
       </motion.article>

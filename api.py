@@ -115,24 +115,45 @@ def get_active_groq_models():
         available_models = groq_client.models.list().data
         model_ids = [m.id for m in available_models]
         
-        # EXCLUDE whisper, vision, and prompt-guard models
-        excluded_keywords = ["whisper", "vision", "prompt-guard"]
+        # EXCLUDE whisper, vision, prompt-guard, and terms-gated/specialized models
+        excluded_keywords = ["whisper", "vision", "prompt-guard", "guard", "orpheus", "canopylabs", "allam"]
         valid_models = [m for m in model_ids if not any(kw in m.lower() for kw in excluded_keywords)]
         
         # Prioritize capable Llama models
-        llama_models = [m for m in valid_models if "llama" in m.lower() and ("70b" in m.lower() or "8b" in m.lower())]
+        llama_models = [m for m in valid_models if "llama" in m.lower() and ("70b" in m.lower() or "8b" in m.lower() or "versatile" in m.lower() or "instant" in m.lower())]
         other_models = [m for m in valid_models if m not in llama_models]
         
         fallback_list = llama_models + other_models
         logging.info(f"Dynamically loaded capable text models: {fallback_list[:3]}")
-        return fallback_list
+        return fallback_list if fallback_list else ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
     except Exception as e:
         logging.error(f"Could not fetch models: {e}")
-        return ["llama-3.3-70b-versatile"] # Absolute fallback
+        return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"] # Absolute fallback
+
+@app.on_event("startup")
+def startup_event():
+    print("Pre-warming Qdrant vector DB gRPC/HTTP connection pool...")
+    try:
+        dummy_vec = list(embedder.embed(["warmup query"]))[0].tolist()
+        _ = qdrant_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=dummy_vec,
+            limit=1
+        )
+        print("Qdrant DB connection warm-up complete.")
+    except Exception as e:
+        print(f"Qdrant warm-up notice: {e}")
+
+    print("Pre-warming Groq API model list...")
+    try:
+        _ = get_active_groq_models()
+        print("Groq API warm-up complete.")
+    except Exception as e:
+        print(f"Groq warm-up notice: {e}")
 
 def generate_with_fallback(
     messages: list[dict],
-    temperature: float = 0.2,
+    temperature: float = 0.0,
     max_tokens: int = 512,
 ) -> tuple[str, str, bool]:
     """Try each dynamically fetched model in order.
@@ -150,12 +171,18 @@ def generate_with_fallback(
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
-            raw = response.choices[0].message.content.strip()
+            raw = response.choices[0].message.content or ""
+            raw = raw.strip()
             # Pass 1: strip fully-closed <think>...</think> blocks
             raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
             # Pass 2: strip unclosed <think>... that runs to end of string
             raw = re.sub(r'<think>.*', '', raw, flags=re.DOTALL)
             raw = raw.strip()
+
+            if not raw:
+                logging.warning(f"⚠️ Model '{model_name}' produced empty output after stripping reasoning tags. Trying next model.")
+                continue
+
             is_degraded = model_name != active_models[0]
             if is_degraded:
                 logging.info(f"Using fallback model '{model_name}'.")
@@ -165,9 +192,9 @@ def generate_with_fallback(
             last_error = e
             continue
             
-    logging.error("❌ All dynamic Groq models failed.")
+    logging.error("❌ All dynamic Groq models failed or returned empty text.")
     
-    # Graceful fallback so the app doesn't crash on the frontend
+    # Graceful fallback so the app doesn't crash or return blank text
     fallback_text = (
         "HINDI: क्षमा करें, सेवा अभी व्यस्त है। कृपया थोड़ी देर बाद पुनः प्रयास करें।\n"
         "ENGLISH: Sorry, the service is currently busy due to high demand. Please try again shortly."
@@ -176,16 +203,20 @@ def generate_with_fallback(
 
 
 
-@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
 def groq_translate_to_hindi(query: str) -> str:
+    if not query or not query.strip():
+        return query
     prompt = f"Translate the following Hinglish/English/Hindi text into clean Devanagari Hindi. Output ONLY the translated Hindi text, nothing else.\n\nText: {query}"
-    completion = groq_client.chat.completions.create(
-        model="llama3-8b-8192",
-        messages=[{"role": "user", "content": prompt}],
-        temperature=0.1,
-        max_tokens=100
-    )
-    return completion.choices[0].message.content.strip()
+    messages = [{"role": "user", "content": prompt}]
+    try:
+        translated, model_used, _ = generate_with_fallback(messages=messages, temperature=0.0, max_tokens=100)
+        if translated and translated.strip() and not translated.startswith("HINDI: क्षमा करें"):
+            logging.info(f"Translated query with '{model_used}': '{query}' -> '{translated.strip()}'")
+            return translated.strip()
+    except Exception as e:
+        logging.warning(f"Translation call failed: {e}")
+    logging.info(f"Falling back to original query: '{query}'")
+    return query
 
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
 def groq_generate_answer(context_text: str, query: str) -> tuple[RAGResponse, str, bool]:
@@ -213,8 +244,13 @@ DO NOT add any other text, markdown, or conversational filler outside of the HIN
     messages = [{"role": "user", "content": prompt}]
 
     raw_response, model_used, is_degraded = generate_with_fallback(
-        messages=messages, temperature=0.2, max_tokens=300
+        messages=messages, temperature=0.0, max_tokens=768
     )
+    if not raw_response or not raw_response.strip():
+        raw_response = (
+            "HINDI: क्षमा करें, संदर्भ के आधार पर उत्तर प्राप्त नहीं हो सका।\n"
+            "ENGLISH: UNANSWERABLE: Sorry, could not generate a response from the context."
+        )
     status = "UNANSWERABLE" if "UNANSWERABLE" in raw_response or "क्षमा करें" in raw_response else "ANSWERED"
     return RAGResponse(synthesized_answer=raw_response, status=status), model_used, is_degraded
 
@@ -281,7 +317,7 @@ def process_retrieve(request: QueryRequest):
             for hit in search_result_fast
         ]
         top_chunk = evidence_shards_fast[0]["text"]
-        fast_answer = f"HINDI: {top_chunk}"
+        fast_answer = f"HINDI: {top_chunk}\nENGLISH: {top_chunk}"
 
     return {
         "type": "fast_answer",
