@@ -39,12 +39,7 @@ app = FastAPI(title="Echo-Sight Voice RAG API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:3001",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:3001",
-    ],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -269,7 +264,7 @@ def retrieve_context(search_query: str):
         query=query_vector,
         limit=10,
         with_payload=["text", "source", "title"],
-        search_params=models.SearchParams(hnsw_ef=64)
+        search_params=models.SearchParams(hnsw_ef=32)
     )
     t2 = time.time()
     return search_response.points, {
