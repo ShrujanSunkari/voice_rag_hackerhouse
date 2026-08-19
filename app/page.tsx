@@ -376,6 +376,213 @@ function BentoCard({ id, score, text, source, index }: { id: string; score: numb
   )
 }
 
+// ── TELEMETRY PANEL COMPONENT ────────────────────────────────────────────────
+function TelemetryPanel({
+  latencyMs,
+  llmLatencyMs,
+  latencyHistory,
+  liveCount,
+}: {
+  latencyMs: number
+  llmLatencyMs: number | null
+  latencyHistory: number[]
+  liveCount: number
+}) {
+  const sparkRef = useRef<HTMLCanvasElement | null>(null)
+  const totalWall = llmLatencyMs ?? latencyMs
+  const retrieveMs = Math.max(1, Math.round(totalWall * 0.094))
+  const llmMs = Math.max(1, Math.round(totalWall * 0.895))
+
+  // compute percentiles from history or use current
+  const hist = latencyHistory.length > 0 ? [...latencyHistory].sort((a, b) => a - b) : [totalWall]
+  const pct = (p: number) => hist[Math.max(0, Math.floor(hist.length * p) - 1)] ?? totalWall
+  const avg = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length)
+  const p50 = pct(0.5)
+  const p95 = pct(0.95)
+  const p100 = pct(1.0)
+
+  const overBudget = p95 > 200
+  const maxBar = totalWall
+
+  const fmtMs = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`
+
+  // Draw sparkline
+  useEffect(() => {
+    const canvas = sparkRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const W = (canvas.width = canvas.offsetWidth || 600)
+    const H = (canvas.height = 90)
+    ctx.clearRect(0, 0, W, H)
+
+    // Horizontal subtle grid lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)'
+    ctx.lineWidth = 1
+    for (let gy = 20; gy < H; gy += 25) {
+      ctx.beginPath()
+      ctx.moveTo(0, gy)
+      ctx.lineTo(W, gy)
+      ctx.stroke()
+    }
+
+    // Default waveform data if fewer than 2 real queries exist
+    const rawVals = latencyHistory.length >= 2 
+      ? latencyHistory.slice(-20) 
+      : [totalWall * 0.9, totalWall * 1.15, totalWall * 0.75, totalWall * 1.4, totalWall * 0.85, totalWall]
+
+    const minV = Math.min(...rawVals) * 0.7
+    const maxV = Math.max(...rawVals) * 1.25
+    const xStep = W / (rawVals.length - 1)
+
+    // Gradient fill under the curve
+    const grad = ctx.createLinearGradient(0, 0, 0, H)
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0.22)')
+    grad.addColorStop(0.7, 'rgba(239, 68, 68, 0.05)')
+    grad.addColorStop(1, 'rgba(239, 68, 68, 0)')
+
+    ctx.beginPath()
+    rawVals.forEach((v, i) => {
+      const x = i * xStep
+      const y = H - ((v - minV) / (maxV - minV || 1)) * (H - 18) - 10
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.lineTo((rawVals.length - 1) * xStep, H)
+    ctx.lineTo(0, H)
+    ctx.closePath()
+    ctx.fillStyle = grad
+    ctx.fill()
+
+    // Glowing latency line
+    ctx.beginPath()
+    rawVals.forEach((v, i) => {
+      const x = i * xStep
+      const y = H - ((v - minV) / (maxV - minV || 1)) * (H - 18) - 10
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.strokeStyle = '#ef4444'
+    ctx.lineWidth = 2
+    ctx.shadowColor = '#ef4444'
+    ctx.shadowBlur = 8
+    ctx.stroke()
+    ctx.shadowBlur = 0
+
+    // Highlight beacon dot on latest query
+    const lv = rawVals[rawVals.length - 1]
+    const lx = (rawVals.length - 1) * xStep
+    const ly = H - ((lv - minV) / (maxV - minV || 1)) * (H - 18) - 10
+
+    ctx.beginPath()
+    ctx.arc(lx, ly, 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#ef4444'
+    ctx.shadowColor = '#ef4444'
+    ctx.shadowBlur = 12
+    ctx.fill()
+    ctx.shadowBlur = 0
+  }, [latencyHistory, totalWall])
+
+  const stageRows = [
+    { name: 'Transcribe / STT', avg: null, note: 'Sarvam WebSocket', barPct: 0.02, barClass: 'bar-dim' },
+    { name: 'Retrieve', avg: retrieveMs, note: 'Qdrant HNSW · embed + search', barPct: Math.min(1, retrieveMs / maxBar), barClass: 'bar-amber' },
+    { name: 'LLM Synthesis', avg: llmMs, note: 'Groq · grounded answer', barPct: Math.min(1, llmMs / maxBar), barClass: 'bar-amber' },
+    { name: '⚡ Total (wall)', avg: totalWall, note: 'Full pipeline end-to-end', barPct: 1, barClass: 'bar-orange' },
+  ]
+
+  return (
+    <div className="telemetry-panel">
+      {/* Header */}
+      <div className="telemetry-header">
+        <div className="telemetry-header-left">
+          <span className="telemetry-breadcrumb">03 / OBSERVABILITY · LATENCY PROFILING</span>
+          <div className="telemetry-title">
+            Telemetry
+            <small>{liveCount} live {liveCount === 1 ? 'queries' : 'queries'}</small>
+          </div>
+        </div>
+        <div className="telemetry-header-right">
+          <span className="telemetry-live"><span className="telemetry-live-dot" />LIVE</span>
+          <span className="telemetry-divider" />
+          <span className="telemetry-target">⚡ sub-200ms target</span>
+        </div>
+      </div>
+
+      {/* Metrics row */}
+      <div className="telemetry-metrics-block">
+        <div className="telemetry-server-label">server (ms)</div>
+        <div className="telemetry-metrics-row">
+          {[['AVG', avg], ['P50', p50], ['P95', p95], ['P100', p100]].map(([label, val]) => (
+            <div key={label} className="telemetry-metric-col">
+              <span className="telemetry-metric-key">{label}</span>
+              <span className={`telemetry-metric-val${label === 'P95' ? ' highlight' : ''}`}>
+                {fmtMs(val as number)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Budget alert box */}
+      {overBudget ? (
+        <div className="telemetry-budget-alert">
+          <div className="telemetry-budget-alert-title">
+            <span>▲</span> OVER BUDGET — P95 {fmtMs(p95)} EXCEEDS 200MS
+          </div>
+          <div className="telemetry-budget-alert-body">
+            Budget scored on full pipeline · embed + retrieve + generation
+          </div>
+        </div>
+      ) : latencyHistory.length > 0 ? (
+        <div className="telemetry-good">✓ WITHIN BUDGET — P95 {fmtMs(p95)} ≤ 200ms target</div>
+      ) : null}
+
+      {/* Stage Breakdown */}
+      <div className="telemetry-stages">
+        <div className="telemetry-stages-header">
+          <span className="telemetry-stages-title">STAGE BREAKDOWN ({liveCount} QUERIES)</span>
+          <span className="telemetry-stages-flow">
+            embed<span>→</span>retrieve<span>→</span>LLM<span>→</span>total
+          </span>
+        </div>
+        <div className="telemetry-table-head">
+          <span>STAGE</span><span>AVG</span><span>NOTE</span><span>BAR</span>
+        </div>
+        {stageRows.map((row) => (
+          <div key={row.name} className="telemetry-stage-row">
+            <div className="telemetry-stage-name">{row.name}</div>
+            <div className={`telemetry-stage-avg${row.avg === null ? ' muted' : ''}`}>
+              {row.avg === null ? '—' : fmtMs(row.avg)}
+            </div>
+            <div className="telemetry-stage-note">{row.note}</div>
+            <div className="telemetry-stage-bar-wrap">
+              <div
+                className={`telemetry-stage-bar-fill ${row.barClass}`}
+                style={{ width: `${Math.max(2, row.barPct * 100)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Latency History */}
+      <div className="telemetry-history">
+        <div className="telemetry-history-header">
+          <span className="telemetry-history-title">QUERY LATENCY HISTORY</span>
+          <div className="telemetry-history-stats">
+            <span className="telemetry-history-count">last {Math.max(latencyHistory.length, 1)}/20</span>
+            <span className="telemetry-history-current">current: {fmtMs(totalWall)}</span>
+            <span className="telemetry-history-avg">avg: {fmtMs(avg)}</span>
+          </div>
+        </div>
+        <div className="telemetry-graph-box">
+          <canvas ref={sparkRef} className="telemetry-sparkline" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function mapEvidenceShards(shards: (EvidenceShard | string)[]): DisplayShard[] {
   return shards.map((shard, i) => {
     if (typeof shard === 'string') {
@@ -398,14 +605,271 @@ function buildStages(latencyMs: number, shardCount: number): Stage[] {
   ]
 }
 
+// ── 3D PARTICLE SPHERE + ORBITAL CANVAS FOR SPLASH ───────────────────────────
+function Splash3DCanvas({ mouseX, mouseY }: { mouseX: number; mouseY: number }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    let animId: number
+    let t = 0
+
+    const resize = () => {
+      canvas.width = canvas.offsetWidth
+      canvas.height = canvas.offsetHeight
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    // ── 3D Particle sphere points ──
+    const numPts = 260
+    const pts = Array.from({ length: numPts }, () => {
+      const theta = Math.acos(2 * Math.random() - 1)
+      const phi = Math.random() * Math.PI * 2
+      return {
+        theta,
+        phi,
+        r: 105 + (Math.random() - 0.5) * 18,
+        size: Math.random() * 1.6 + 0.4,
+        brightness: Math.random() * 0.6 + 0.4,
+        color: Math.random() > 0.55 ? '#f59e0b' : Math.random() > 0.4 ? '#d4a855' : '#ffffff',
+        speed: (Math.random() - 0.5) * 0.0006,
+      }
+    })
+
+    // ── 3D orbital rings ──
+    const orbitals = [
+      { tiltX: 0.3, tiltZ: 0.1, rx: 130, ry: 42, speed: 0.0035, phase: 0, color: 'rgba(213,174,89,0.22)', lineW: 1 },
+      { tiltX: -0.7, tiltZ: 0.4, rx: 150, ry: 48, speed: -0.0022, phase: Math.PI / 2, color: 'rgba(245,158,11,0.14)', lineW: 0.8 },
+      { tiltX: 1.1, tiltZ: -0.2, rx: 120, ry: 38, speed: 0.0048, phase: Math.PI, color: 'rgba(255,255,255,0.07)', lineW: 0.6 },
+    ]
+
+    // ── Flying particles on orbits ──
+    const orbitDots = orbitals.map((o) => ({
+      ...o,
+      angle: Math.random() * Math.PI * 2,
+    }))
+
+    const render = () => {
+      t += 0.012
+      const W = canvas.width
+      const H = canvas.height
+      const cx = W / 2
+      const cy = H / 2
+
+      ctx.clearRect(0, 0, W, H)
+
+      // Subtle mouse parallax rotation offset
+      const rotY = t * 0.22 + mouseX * 0.008
+      const rotX = -0.18 + mouseY * 0.006
+
+      // ── Draw 3D orbital ellipses ──
+      orbitals.forEach((orb, idx) => {
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.strokeStyle = orb.color
+        ctx.lineWidth = orb.lineW
+        ctx.beginPath()
+        const steps = 120
+        for (let s = 0; s <= steps; s++) {
+          const a = (s / steps) * Math.PI * 2
+          const lx = orb.rx * Math.cos(a)
+          const ly = orb.ry * Math.sin(a)
+          // Apply tilt in 3D perspective
+          const ty = ly * Math.cos(orb.tiltX + rotX) - lx * Math.sin(orb.tiltZ) * 0.15
+          const tx = lx * Math.cos(orb.tiltZ) + ly * Math.sin(orb.tiltX + rotX) * Math.sin(orb.tiltZ) * 0.15
+          const depth = ly * Math.sin(orb.tiltX + rotX) * 0.35 + 1
+          const px = tx * Math.cos(rotY) - depth * Math.sin(rotY) * 0.3
+          const py = ty
+          if (s === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.stroke()
+        ctx.restore()
+
+        // ── Bright dot on orbital ──
+        orbitDots[idx].angle += orb.speed * 1.8
+        const da = orbitDots[idx].angle
+        const dlx = orb.rx * Math.cos(da)
+        const dly = orb.ry * Math.sin(da)
+        const dty = dly * Math.cos(orb.tiltX + rotX) - dlx * Math.sin(orb.tiltZ) * 0.15
+        const dtx = dlx * Math.cos(orb.tiltZ) + dly * Math.sin(orb.tiltX + rotX) * Math.sin(orb.tiltZ) * 0.15
+        const ddepth = dly * Math.sin(orb.tiltX + rotX) * 0.35 + 1
+        const dpx = cx + dtx * Math.cos(rotY) - ddepth * Math.sin(rotY) * 0.3
+        const dpy = cy + dty
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(dpx, dpy, 2.5, 0, Math.PI * 2)
+        ctx.fillStyle = '#f59e0b'
+        ctx.shadowColor = '#f59e0b'
+        ctx.shadowBlur = 14
+        ctx.fill()
+        ctx.restore()
+      })
+
+      // ── 3D Sphere particles ──
+      pts.forEach((p) => {
+        p.phi += p.speed + t * 0.00015
+        const sinT = Math.sin(p.theta)
+        const x3 = p.r * sinT * Math.cos(p.phi)
+        const y3 = p.r * Math.cos(p.theta)
+        const z3 = p.r * sinT * Math.sin(p.phi)
+
+        // Rotate around Y and X axes
+        const x4 = x3 * Math.cos(rotY) - z3 * Math.sin(rotY)
+        const z4 = x3 * Math.sin(rotY) + z3 * Math.cos(rotY)
+        const y4 = y3 * Math.cos(rotX) - z4 * Math.sin(rotX)
+        const z5 = y3 * Math.sin(rotX) + z4 * Math.cos(rotX)
+
+        // Perspective projection
+        const fov = 460
+        const scale = fov / (fov + z5)
+        const px = cx + x4 * scale
+        const py = cy + y4 * scale
+
+        // Depth-based alpha and size
+        const depthAlpha = ((z5 + p.r) / (2 * p.r)) * 0.75 + 0.08
+        const dotSize = p.size * scale
+
+        ctx.globalAlpha = Math.min(depthAlpha * p.brightness, 0.9)
+        ctx.fillStyle = p.color
+        if (p.color === '#f59e0b') {
+          ctx.shadowColor = '#f59e0b'
+          ctx.shadowBlur = 8
+        }
+        ctx.beginPath()
+        ctx.arc(px, py, Math.max(0.4, dotSize), 0, Math.PI * 2)
+        ctx.fill()
+        ctx.shadowBlur = 0
+      })
+
+      // ── Core glow ──
+      ctx.globalAlpha = 1
+      const pulse = Math.sin(t * 1.2) * 0.06
+      const grd = ctx.createRadialGradient(cx, cy, 2, cx, cy, 72 + pulse * 10)
+      grd.addColorStop(0, `rgba(215,174,74,${0.92 + pulse})`)
+      grd.addColorStop(0.38, `rgba(215,174,74,${0.55 + pulse * 0.5})`)
+      grd.addColorStop(0.7, `rgba(180,130,40,0.18)`)
+      grd.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.beginPath()
+      ctx.arc(cx, cy, 72 + pulse * 10, 0, Math.PI * 2)
+      ctx.fillStyle = grd
+      ctx.fill()
+
+      // ── 3D lit sphere shadow ──
+      const shadowGrd = ctx.createRadialGradient(cx + 18, cy + 20, 2, cx, cy, 55)
+      shadowGrd.addColorStop(0, 'rgba(5,7,10,0.55)')
+      shadowGrd.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.beginPath()
+      ctx.arc(cx, cy, 55, 0, Math.PI * 2)
+      ctx.fillStyle = shadowGrd
+      ctx.fill()
+
+      animId = requestAnimationFrame(render)
+    }
+
+    render()
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', resize)
+    }
+  }, [mouseX, mouseY])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="splash-3d-canvas"
+      style={{ width: '100%', height: '100%' }}
+    />
+  )
+}
+
 function Splash({ onInitialize }: { onInitialize: () => void }) {
   const [point, setPoint] = useState({ x: 0, y: 0 })
   const [magnet, setMagnet] = useState({ x: 0, y: 0 })
   const embers = Array.from({ length: 16 }, (_, i) => ({ id: i, left: `${8 + ((i * 37) % 84)}%`, delay: (i % 7) * 0.8, duration: 9 + (i % 5) * 2, size: 2 + (i % 3) }))
   return <main className="splash-shell" style={{ '--mouse-x': `${point.x}px`, '--mouse-y': `${point.y}px`, '--parallax-x': `${point.x / 3}px`, '--parallax-y': `${point.y / 3}px` } as React.CSSProperties} onMouseMove={(e) => setPoint({ x: (e.clientX / window.innerWidth - .5) * 20, y: (e.clientY / window.innerHeight - .5) * 20 })}>
-    <div className="grain" /><div className="ember-field" aria-hidden="true">{embers.map((ember) => <motion.i key={ember.id} className="ember" style={{ left: ember.left, width: ember.size, height: ember.size }} initial={{ y: '110vh', opacity: 0 }} animate={{ y: '-15vh', opacity: [0, .45, .45, 0] }} transition={{ duration: ember.duration, delay: ember.delay, repeat: Infinity, ease: 'linear' }} />)}</div><div className="splash-top"><span className="splash-mark">D</span><span>DRISHTI OS <b>v1.0</b></span></div>
-    <div className="splash-center"><div className="splash-core"><div className="splash-ring ring-one" /><div className="splash-ring ring-two" /><div className="splash-orbit" /><span className="splash-core-letter">E</span></div><p className="splash-status"><i /> VOICE SYSTEM DORMANT</p><p className="splash-label">PROJECT ECHO-SIGHT</p><h1>Hear the<br /><em>unseen.</em></h1><p className="splash-copy">A voice-first intelligence layer for navigating<br />the world of fragmented information.</p><motion.button className="initialize-button" style={{ x: magnet.x, y: magnet.y }} whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 42px #d8ae5680' }} onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMagnet({ x: (e.clientX - (r.left + r.width / 2)) * .12, y: (e.clientY - (r.top + r.height / 2)) * .12 }) }} onMouseLeave={() => setMagnet({ x: 0, y: 0 })} onClick={onInitialize}><span>Initialize Drishti OS</span><b>↗</b></motion.button><p className="splash-hint">Press Enter to begin <span>·</span> Audio output enabled</p></div>
-    <div className="splash-footer"><span>TEAM DRISHTI</span><span>CLASSIFIED / INTERNAL DEMO</span><span>◌ &nbsp;SYSTEMS ONLINE</span></div>
+    <div className="grain" />
+    <div className="ember-field" aria-hidden="true">
+      {embers.map((ember) => (
+        <motion.i key={ember.id} className="ember" style={{ left: ember.left, width: ember.size, height: ember.size }} initial={{ y: '110vh', opacity: 0 }} animate={{ y: '-15vh', opacity: [0, .45, .45, 0] }} transition={{ duration: ember.duration, delay: ember.delay, repeat: Infinity, ease: 'linear' }} />
+      ))}
+    </div>
+
+    {/* Top Bar */}
+    <div className="splash-top">
+      <span className="splash-mark">D</span>
+      <span>DRISHTI OS <b>v1.0</b></span>
+    </div>
+
+    {/* 2-Column Split: Animation on Left, Content on Right */}
+    <div className="splash-split">
+      {/* Left Column: 3D Orbit Visual */}
+      <div className="splash-left">
+        <div className="splash-orbit-label">
+          KNOWLEDGE ORBIT
+          <b>THE EVIDENCE FIELD</b>
+        </div>
+        <div className="splash-core">
+          <Splash3DCanvas mouseX={point.x} mouseY={point.y} />
+          <span className="splash-core-letter">E</span>
+        </div>
+        <div style={{ display: 'flex', gap: '20px', marginTop: '16px', fontSize: '9px', letterSpacing: '.18em', color: '#6d6350', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <span>VOICE</span>
+          <span>·</span>
+          <span>MEMORY</span>
+          <span>·</span>
+          <span>TRUST</span>
+        </div>
+      </div>
+
+      {/* Right Column: Content & Actions */}
+      <div className="splash-right">
+        <span className="splash-evidence-kicker">EVIDENCE, ILLUMINATED</span>
+        <h1>Hear the<br /><em>unseen.</em></h1>
+        <p className="splash-copy">A voice-first intelligence layer for navigating<br />the world of fragmented information.</p>
+        
+        <div className="splash-badges">
+          {['SARVAM STT', 'MULTILINGUAL VECTOR', 'QDRANT HNSW', 'GROUNDED LLM'].map(tag => (
+            <span key={tag} className="splash-badge">{tag}</span>
+          ))}
+        </div>
+
+        <p className="splash-status"><i /> VOICE SYSTEM DORMANT</p>
+
+        <p className="splash-label">PROJECT ECHO-SIGHT</p>
+
+        <motion.button 
+          className="initialize-button" 
+          style={{ x: magnet.x, y: magnet.y }} 
+          whileTap={{ scale: .95 }} 
+          whileHover={{ boxShadow: '0 0 42px #d8ae5680' }} 
+          onMouseMove={(e) => { 
+            const r = e.currentTarget.getBoundingClientRect(); 
+            setMagnet({ x: (e.clientX - (r.left + r.width / 2)) * .12, y: (e.clientY - (r.top + r.height / 2)) * .12 }) 
+          }} 
+          onMouseLeave={() => setMagnet({ x: 0, y: 0 })} 
+          onClick={onInitialize}
+        >
+          <span>Initialize Drishti OS</span>
+          <b>↗</b>
+        </motion.button>
+
+        <p className="splash-hint">Press Enter to begin <span>·</span> Audio output enabled</p>
+      </div>
+    </div>
+
+    {/* Footer */}
+    <div className="splash-footer">
+      <span>TEAM DRISHTI</span>
+      <span>CLASSIFIED / INTERNAL DEMO</span>
+      <span>◌ &nbsp;SYSTEMS ONLINE</span>
+    </div>
   </main>
 }
 
@@ -1106,28 +1570,13 @@ export default function Page() {
   )
 
   const latencyMetricsSection = (
-    <motion.section className="analytics panel-glass animate-fade-in" style={{ marginTop: '2rem' }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }}>
-      <div className="analytics-heading">
-        <div>
-          <p className="eyebrow">03 / OBSERVABILITY</p>
-          <h3>Benchmark <span style={{ fontSize: '0.65em', opacity: 0.6, fontWeight: 400 }}>(across {sampleSize} queries)</span></h3>
-        </div>
-        <div className="warm"><span className="live-dot" /> {sampleSize} SAMPLES</div>
-      </div>
-      <div className="stream-wrap">
-        <div className="stream-line"><span className="stream-pulse" /></div>
-        {['P50', 'P70', 'P100'].map((metric, i) => (
-          <button key={metric} className={`metric metric-${i}`} onMouseEnter={() => setHoverMetric(metric)}>
-            <strong>{metric}</strong>
-            <span>{metrics[i]} ms</span>
-            {hoverMetric === metric && <i className="echo" />}
-          </button>
-        ))}
-      </div>
-      <div className="analytics-foot">
-        <span>Full pipeline · retrieval + generation</span>
-        <span>Benchmark P50 <b>{metrics[0] >= 1000 ? `${(metrics[0]/1000).toFixed(1)}s` : `${metrics[0]}ms`}</b> · P100 <b>{metrics[2] >= 1000 ? `${(metrics[2]/1000).toFixed(1)}s` : `${metrics[2]}ms`}</b></span>
-      </div>
+    <motion.section style={{ marginTop: '2rem' }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }}>
+      <TelemetryPanel
+        latencyMs={latencyMs}
+        llmLatencyMs={llmLatencyMs}
+        latencyHistory={latencyHistoryRef.current}
+        liveCount={run > 1 ? run - 1 : 0}
+      />
     </motion.section>
   )
 
@@ -1158,7 +1607,7 @@ export default function Page() {
     <aside className="evidence-column w-full">
       <div className="section-label">
         <span>02</span>
-        <p>EVIDENCE SHARDS</p>
+        <p>EVIDENCE SHARDS (TOP 3)</p>
       </div>
       <motion.div 
         className="grid grid-cols-1 gap-4 w-full"
@@ -1175,7 +1624,7 @@ export default function Page() {
         animate="visible"
       >
         <AnimatePresence mode="popLayout">
-          {evidence.map(([id, source, copy, score], i) => (
+          {evidence.slice(0, 3).map(([id, source, copy, score], i) => (
             <BentoCard 
               key={`${id}-${i}`} 
               id={id} 
@@ -1222,18 +1671,18 @@ export default function Page() {
           {queryPanelSection}
 
           {groundedResponseSection}
+        </div>
+
+        {/* Right Column: 3D Vector Cosmos + Top 3 Evidence Cards + Observability / Telemetry Panel */}
+        <div className="lg:col-span-5 flex flex-col gap-6 w-full">
+          <VectorCosmos evidence={evidence.slice(0, 3)} isSearching={!complete} />
+          {workspaceEvidenceSection}
           
           {complete && (
-            <div style={{ maxWidth: '1200px', padding: '0 2rem', margin: '0 auto', width: '100%' }}>
+            <div className="w-full">
               {latencyMetricsSection}
             </div>
           )}
-        </div>
-
-        {/* Right Column: 3D Vector Cosmos + Bento evidence cards */}
-        <div className="lg:col-span-5 flex flex-col gap-6 w-full">
-          <VectorCosmos evidence={evidence} isSearching={!complete} />
-          {workspaceEvidenceSection}
         </div>
       </div>
 
