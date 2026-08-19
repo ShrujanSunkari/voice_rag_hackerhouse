@@ -1,5 +1,6 @@
 import os
 import time
+import itertools
 import requests
 import json
 import re
@@ -11,7 +12,10 @@ from typing import Literal
 from qdrant_client import QdrantClient
 from fastembed import TextEmbedding
 from groq import Groq
-from groq import RateLimitError as GroqRateLimitError, APIStatusError as GroqAPIStatusError
+from groq import (
+    RateLimitError as GroqRateLimitError,
+    APIStatusError as GroqAPIStatusError,
+)
 from tenacity import retry, stop_after_attempt, wait_exponential
 from dotenv import load_dotenv
 
@@ -22,7 +26,9 @@ load_dotenv()
 # ==========================================
 QDRANT_URL = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-GROQ_API_KEYS = [key for key in (os.environ.get(f"GROQ_API_KEY{i}") for i in range(1, 6)) if key]
+GROQ_API_KEYS = [
+    key for key in (os.environ.get(f"GROQ_API_KEY{i}") for i in range(1, 6)) if key
+]
 if not GROQ_API_KEYS and os.environ.get("GROQ_API_KEY"):
     GROQ_API_KEYS = [os.environ.get("GROQ_API_KEY")]
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY")
@@ -31,14 +37,18 @@ qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, prefer_grpc
 groq_key_index = 0
 groq_client = Groq(api_key=GROQ_API_KEYS[groq_key_index])
 
+
 def rotate_groq_key():
     global groq_key_index, groq_client
     groq_key_index = (groq_key_index + 1) % len(GROQ_API_KEYS)
     groq_client = Groq(api_key=GROQ_API_KEYS[groq_key_index])
     print(f"Groq rate limit hit. Rotated to GROQ_API_KEY{groq_key_index + 1}")
 
+
 print("Loading local embedder for queries...")
-embedder = TextEmbedding(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
+embedder = TextEmbedding(
+    model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+)
 print("Warming up embedder...")
 _ = list(embedder.embed(["warmup query"]))
 print("API Setup Complete.")
@@ -55,6 +65,17 @@ app.add_middleware(
 )
 
 request_latencies = []
+request_counter = itertools.count(1)
+
+
+def tlog(req_id: int, stage: str, ms: float, extra: str = ""):
+    """Single-line lightweight timing log, greppable via '[TIMING]'."""
+    print(f"[TIMING] req={req_id} {stage}={ms:.1f}ms {extra}", flush=True)
+
+
+def next_req_id() -> int:
+    return next(request_counter)
+
 
 # ==========================================
 # 2. DATA MODELS
@@ -63,9 +84,13 @@ class QueryRequest(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
     transcript: str = Field(..., validation_alias=AliasChoices("transcript", "query"))
 
+
 class SynthesisRequest(BaseModel):
     transcript: str
-    evidence_shards: list[str | dict]  # accepts both plain strings and {text, score, source} dicts
+    evidence_shards: list[
+        str | dict
+    ]  # accepts both plain strings and {text, score, source} dicts
+
 
 class QueryResponse(BaseModel):
     synthesized_answer: str
@@ -75,9 +100,11 @@ class QueryResponse(BaseModel):
     model_used: str = ""
     is_degraded: bool = False
 
+
 class RAGResponse(BaseModel):
     synthesized_answer: str
     status: Literal["ANSWERED", "UNANSWERABLE"]
+
 
 # ==========================================
 # 3. METRICS & ENDPOINTS
@@ -89,6 +116,7 @@ def get_percentile(data, p):
     idx = int((len(s_data) - 1) * p / 100.0)
     return s_data[idx]
 
+
 @app.get("/api/metrics")
 def get_metrics():
     try:
@@ -97,14 +125,14 @@ def get_metrics():
         return {
             "retrieval": data.get("retrieval_metrics", {}),
             "full_pipeline": data.get("full_pipeline_metrics", {}),
-            "sample_size": data.get("num_queries", 100)
+            "sample_size": data.get("num_queries", 100),
         }
     except Exception as e:
         return {
             "retrieval": {"P50": 0, "P70": 0, "P100": 0},
             "full_pipeline": {"P50": 0, "P70": 0, "P100": 0},
             "sample_size": 0,
-            "error": str(e)
+            "error": str(e),
         }
 
 
@@ -113,26 +141,52 @@ def get_metrics():
 # ==========================================
 import logging
 
+
 def get_active_groq_models():
     try:
         # Ask Groq what models are currently active and available
         available_models = groq_client.models.list().data
         model_ids = [m.id for m in available_models]
-        
+
         # EXCLUDE whisper, vision, prompt-guard, and terms-gated/specialized models
-        excluded_keywords = ["whisper", "vision", "prompt-guard", "guard", "orpheus", "canopylabs", "allam"]
-        valid_models = [m for m in model_ids if not any(kw in m.lower() for kw in excluded_keywords)]
-        
+        excluded_keywords = [
+            "whisper",
+            "vision",
+            "prompt-guard",
+            "guard",
+            "orpheus",
+            "canopylabs",
+            "allam",
+        ]
+        valid_models = [
+            m for m in model_ids if not any(kw in m.lower() for kw in excluded_keywords)
+        ]
+
         # Prioritize capable Llama models
-        llama_models = [m for m in valid_models if "llama" in m.lower() and ("70b" in m.lower() or "8b" in m.lower() or "versatile" in m.lower() or "instant" in m.lower())]
+        llama_models = [
+            m
+            for m in valid_models
+            if "llama" in m.lower()
+            and (
+                "70b" in m.lower()
+                or "8b" in m.lower()
+                or "versatile" in m.lower()
+                or "instant" in m.lower()
+            )
+        ]
         other_models = [m for m in valid_models if m not in llama_models]
-        
+
         fallback_list = llama_models + other_models
         logging.info(f"Dynamically loaded capable text models: {fallback_list[:3]}")
-        return fallback_list if fallback_list else ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+        return (
+            fallback_list
+            if fallback_list
+            else ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+        )
     except Exception as e:
         logging.error(f"Could not fetch models: {e}")
-        return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"] # Absolute fallback
+        return ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]  # Absolute fallback
+
 
 @app.on_event("startup")
 def startup_event():
@@ -140,9 +194,7 @@ def startup_event():
     try:
         dummy_vec = list(embedder.embed(["warmup query"]))[0].tolist()
         _ = qdrant_client.query_points(
-            collection_name=COLLECTION_NAME,
-            query=dummy_vec,
-            limit=1
+            collection_name=COLLECTION_NAME, query=dummy_vec, limit=1
         )
         print("Qdrant DB connection warm-up complete.")
     except Exception as e:
@@ -155,10 +207,12 @@ def startup_event():
     except Exception as e:
         print(f"Groq warm-up notice: {e}")
 
+
 def generate_with_fallback(
     messages: list[dict],
     temperature: float = 0.0,
     max_tokens: int = 512,
+    req_id: int = 0,
 ) -> tuple[str, str, bool]:
     """Try each dynamically fetched model in order.
     Returns (raw_text, model_used, is_degraded).
@@ -166,26 +220,36 @@ def generate_with_fallback(
     last_error = None
     active_models = get_active_groq_models()
     key_rotations = 0
-    
+
     for model_name in active_models:
         try:
             logging.info(f"Attempting inference with model: {model_name}")
+            llm_t0 = time.perf_counter()
             response = groq_client.chat.completions.create(
                 model=model_name,
                 messages=messages,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
+            llm_ms = (time.perf_counter() - llm_t0) * 1000
+            tlog(
+                req_id,
+                "groq_llm",
+                llm_ms,
+                extra=f"model={model_name} key={groq_key_index + 1}",
+            )
             raw = response.choices[0].message.content or ""
             raw = raw.strip()
             # Pass 1: strip fully-closed <think>...</think> blocks
-            raw = re.sub(r'<think>.*?</think>', '', raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL)
             # Pass 2: strip unclosed <think>... that runs to end of string
-            raw = re.sub(r'<think>.*', '', raw, flags=re.DOTALL)
+            raw = re.sub(r"<think>.*", "", raw, flags=re.DOTALL)
             raw = raw.strip()
 
             if not raw:
-                logging.warning(f"⚠️ Model '{model_name}' produced empty output after stripping reasoning tags. Trying next model.")
+                logging.warning(
+                    f"⚠️ Model '{model_name}' produced empty output after stripping reasoning tags. Trying next model."
+                )
                 continue
 
             is_degraded = model_name != active_models[0]
@@ -196,20 +260,26 @@ def generate_with_fallback(
             if key_rotations < len(GROQ_API_KEYS) - 1:
                 key_rotations += 1
                 rotate_groq_key()
-                logging.warning(f"Rate limited on '{model_name}'. Retrying same model with GROQ_API_KEY{groq_key_index + 1}.")
+                logging.warning(
+                    f"Rate limited on '{model_name}'. Retrying same model with GROQ_API_KEY{groq_key_index + 1}."
+                )
                 active_models.append(model_name)
                 last_error = e
                 continue
-            logging.warning(f"Rate limited on '{model_name}' and all {len(GROQ_API_KEYS)} Groq API keys exhausted. Skipping to next model.")
+            logging.warning(
+                f"Rate limited on '{model_name}' and all {len(GROQ_API_KEYS)} Groq API keys exhausted. Skipping to next model."
+            )
             last_error = e
             continue
         except Exception as e:
-            logging.warning(f"⚠️ Failed on '{model_name}'. Reason: {str(e)[:100]}... Skipping to next.")
+            logging.warning(
+                f"⚠️ Failed on '{model_name}'. Reason: {str(e)[:100]}... Skipping to next."
+            )
             last_error = e
             continue
-            
+
     logging.error("❌ All dynamic Groq models failed or returned empty text.")
-    
+
     # Graceful fallback so the app doesn't crash or return blank text
     fallback_text = (
         "HINDI: क्षमा करें, सेवा अभी व्यस्त है। कृपया थोड़ी देर बाद पुनः प्रयास करें।\n"
@@ -218,24 +288,34 @@ def generate_with_fallback(
     return fallback_text, "none", True
 
 
-
-def groq_translate_to_hindi(query: str) -> str:
+def groq_translate_to_hindi(query: str, req_id: int = 0) -> str:
     if not query or not query.strip():
         return query
     prompt = f"Translate the following Hinglish/English/Hindi text into clean Devanagari Hindi. Output ONLY the translated Hindi text, nothing else.\n\nText: {query}"
     messages = [{"role": "user", "content": prompt}]
     try:
-        translated, model_used, _ = generate_with_fallback(messages=messages, temperature=0.0, max_tokens=100)
-        if translated and translated.strip() and not translated.startswith("HINDI: क्षमा करें"):
-            logging.info(f"Translated query with '{model_used}': '{query}' -> '{translated.strip()}'")
+        translated, model_used, _ = generate_with_fallback(
+            messages=messages, temperature=0.0, max_tokens=100, req_id=req_id
+        )
+        if (
+            translated
+            and translated.strip()
+            and not translated.startswith("HINDI: क्षमा करें")
+        ):
+            logging.info(
+                f"Translated query with '{model_used}': '{query}' -> '{translated.strip()}'"
+            )
             return translated.strip()
     except Exception as e:
         logging.warning(f"Translation call failed: {e}")
     logging.info(f"Falling back to original query: '{query}'")
     return query
 
+
 @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=5))
-def groq_generate_answer(context_text: str, query: str) -> tuple[RAGResponse, str, bool]:
+def groq_generate_answer(
+    context_text: str, query: str, req_id: int = 0
+) -> tuple[RAGResponse, str, bool]:
     prompt_template = """
 CRITICAL INSTRUCTION: You are a strict, highly accurate AI assistant. You MUST answer the user's question using ONLY the information provided in the Context below.
 
@@ -260,45 +340,72 @@ DO NOT add any other text, markdown, or conversational filler outside of the HIN
     messages = [{"role": "user", "content": prompt}]
 
     raw_response, model_used, is_degraded = generate_with_fallback(
-        messages=messages, temperature=0.0, max_tokens=768
+        messages=messages, temperature=0.0, max_tokens=768, req_id=req_id
     )
     if not raw_response or not raw_response.strip():
         raw_response = (
             "HINDI: क्षमा करें, संदर्भ के आधार पर उत्तर प्राप्त नहीं हो सका।\n"
             "ENGLISH: UNANSWERABLE: Sorry, could not generate a response from the context."
         )
-    status = "UNANSWERABLE" if "UNANSWERABLE" in raw_response or "क्षमा करें" in raw_response else "ANSWERED"
-    return RAGResponse(synthesized_answer=raw_response, status=status), model_used, is_degraded
+    status = (
+        "UNANSWERABLE"
+        if "UNANSWERABLE" in raw_response or "क्षमा करें" in raw_response
+        else "ANSWERED"
+    )
+    return (
+        RAGResponse(synthesized_answer=raw_response, status=status),
+        model_used,
+        is_degraded,
+    )
 
-def retrieve_context(search_query: str):
+
+def retrieve_context(search_query: str, req_id: int = 0):
     import time
     from qdrant_client import models
-    
+
     if len(search_query) > 512:
         search_query = search_query[:512]
-        
-    t0 = time.time()
+
+    t0 = time.perf_counter()
     query_vector = list(embedder.embed([search_query]))[0].tolist()
-    t1 = time.time()
+    t1 = time.perf_counter()
     search_response = qdrant_client.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
         limit=10,
         with_payload=["text", "source", "title"],
-        search_params=models.SearchParams(hnsw_ef=32)
+        search_params=models.SearchParams(hnsw_ef=32),
     )
-    t2 = time.time()
-    return search_response.points, {
-        "embedding_ms": (t1 - t0) * 1000,
-        "qdrant_network_ms": (t2 - t1) * 1000,
-        "total_ms": (t2 - t0) * 1000
+    t2 = time.perf_counter()
+    embed_ms = (t1 - t0) * 1000
+    qdrant_ms = (t2 - t1) * 1000
+    hits = search_response.points
+    top_score = hits[0].score if hits else -1
+    tlog(req_id, "embedding_cpu", embed_ms, extra="local MiniLM model")
+    tlog(
+        req_id,
+        "qdrant_search",
+        qdrant_ms,
+        extra=f"hits={len(hits)} top_score={top_score:.3f}",
+    )
+    return hits, {
+        "embedding_ms": embed_ms,
+        "qdrant_network_ms": qdrant_ms,
+        "total_ms": (t2 - t0) * 1000,
     }
+
 
 @app.post("/api/retrieve")
 def process_retrieve(request: QueryRequest):
+    req_id = next_req_id()
+    t_start = time.perf_counter()
+    print(
+        f"[TIMING] req={req_id} start path=/api/retrieve q='{request.transcript[:60]}'",
+        flush=True,
+    )
     search_query_fast = request.transcript
-    search_result_fast, latency_dict = retrieve_context(search_query_fast)
-    
+    search_result_fast, latency_dict = retrieve_context(search_query_fast, req_id)
+
     evidence_shards_fast = []
     fast_answer = ""
 
@@ -329,12 +436,24 @@ def process_retrieve(request: QueryRequest):
         fast_answer = "HINDI: क्षमा करें, मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली।\nENGLISH: UNANSWERABLE: Sorry, I couldn't find enough information on this topic."
     else:
         evidence_shards_fast = [
-            {"text": hit.payload.get("text", ""), "score": round(hit.score, 4), "source": hit.payload.get("source", "")}
+            {
+                "text": hit.payload.get("text", ""),
+                "score": round(hit.score, 4),
+                "source": hit.payload.get("source", ""),
+            }
             for hit in search_result_fast
         ]
         top_chunk = evidence_shards_fast[0]["text"]
         fast_answer = f"HINDI: {top_chunk}\nENGLISH: {top_chunk}"
 
+    total_ms = (time.perf_counter() - t_start) * 1000
+    overhead_ms = total_ms - latency_dict["total_ms"]
+    tlog(
+        req_id,
+        "endpoint_total",
+        total_ms,
+        extra=f"path=/api/retrieve shards={len(evidence_shards_fast)} overhead={overhead_ms:.1f}ms",
+    )
     return {
         "type": "fast_answer",
         "synthesized_answer": fast_answer,
@@ -342,29 +461,42 @@ def process_retrieve(request: QueryRequest):
         "retrieval_latency_ms": latency_dict["total_ms"],
         "transcript": request.transcript,
         "model_used": "extractive",
-        "is_degraded": False
+        "is_degraded": False,
     }
+
 
 @app.post("/api/synthesize")
 def process_synthesize(request: SynthesisRequest):
-    start_time = time.time()
-    
+    req_id = next_req_id()
+    start_time = time.perf_counter()
+    translate_ms = 0.0
+    print(
+        f"[TIMING] req={req_id} start path=/api/synthesize q='{request.transcript[:60]}'",
+        flush=True,
+    )
+
     search_query = request.transcript
-    if re.search(r'[a-zA-Z]', search_query):
+    if re.search(r"[a-zA-Z]", search_query):
         try:
-            translated = groq_translate_to_hindi(search_query)
+            t_tr = time.perf_counter()
+            translated = groq_translate_to_hindi(search_query, req_id)
+            translate_ms = (time.perf_counter() - t_tr) * 1000
+            tlog(req_id, "translate_stage", translate_ms)
             if translated:
                 search_query = translated
                 print(f"Translated query: '{request.transcript}' -> '{search_query}'")
         except Exception as e:
             print(f"Translation failed: {e}")
-            
+
     MAX_QUERY_CHARS = 512
     if len(search_query) > MAX_QUERY_CHARS:
-        print(f"[WARN] Query truncated from {len(search_query)} to {MAX_QUERY_CHARS} chars.")
+        print(
+            f"[WARN] Query truncated from {len(search_query)} to {MAX_QUERY_CHARS} chars."
+        )
         search_query = search_query[:MAX_QUERY_CHARS]
 
-    search_result, _ = retrieve_context(search_query)
+    search_result, ret_latency = retrieve_context(search_query, req_id)
+    llm_ms = 0.0
 
     if not search_result or search_result[0].score < 0.45:
         polished_answer = "HINDI: क्षमा करें, मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली।\nENGLISH: UNANSWERABLE: Sorry, I couldn't find enough information on this topic."
@@ -377,12 +509,21 @@ def process_synthesize(request: SynthesisRequest):
         ]
     else:
         evidence_shards = [
-            {"text": hit.payload.get("text", ""), "score": round(hit.score, 4), "source": hit.payload.get("source", "")}
+            {
+                "text": hit.payload.get("text", ""),
+                "score": round(hit.score, 4),
+                "source": hit.payload.get("source", ""),
+            }
             for hit in search_result
         ]
         context_text = "\n\n".join(s["text"] for s in evidence_shards)
         try:
-            rag_res, model_used, is_degraded = groq_generate_answer(context_text, request.transcript)
+            t_llm = time.perf_counter()
+            rag_res, model_used, is_degraded = groq_generate_answer(
+                context_text, request.transcript, req_id
+            )
+            llm_ms = (time.perf_counter() - t_llm) * 1000
+            tlog(req_id, "llm_stage", llm_ms, extra=f"model={model_used}")
             polished_answer = rag_res.synthesized_answer
         except Exception as e:
             print(f"Groq API Error: {e}")
@@ -390,9 +531,21 @@ def process_synthesize(request: SynthesisRequest):
             model_used = "none"
             is_degraded = True
 
-    polished_latency = round((time.time() - start_time) * 1000, 2)
+    polished_latency = round((time.perf_counter() - start_time) * 1000, 2)
     request_latencies.append(polished_latency)
-    
+    overhead_ms = polished_latency - (translate_ms + ret_latency["total_ms"] + llm_ms)
+    tlog(
+        req_id,
+        "endpoint_total",
+        polished_latency,
+        extra=(
+            f"path=/api/synthesize translate={translate_ms:.0f}ms "
+            f"retrieve={ret_latency['total_ms']:.0f}ms "
+            f"(embed={ret_latency['embedding_ms']:.0f} qdrant={ret_latency['qdrant_network_ms']:.0f}) "
+            f"llm={llm_ms:.0f}ms overhead={overhead_ms:.1f}ms"
+        ),
+    )
+
     return {
         "type": "polished_answer",
         "synthesized_answer": polished_answer,
@@ -400,24 +553,34 @@ def process_synthesize(request: SynthesisRequest):
         "latency_ms": polished_latency,
         "transcript": request.transcript,
         "model_used": model_used,
-        "is_degraded": is_degraded
+        "is_degraded": is_degraded,
     }
+
 
 @app.post("/api/voice")
 async def process_raw_audio(file: UploadFile = File(...)):
-    total_start_time = time.time()
+    req_id = next_req_id()
+    total_start_time = time.perf_counter()
     audio_content = await file.read()
-    
+    print(
+        f"[TIMING] req={req_id} start path=/api/voice file={file.filename} bytes={len(audio_content)}",
+        flush=True,
+    )
+
     sarvam_url = "https://api.sarvam.ai/speech-to-text"
     headers = {"api-subscription-key": SARVAM_API_KEY}
     files = {"file": (file.filename, audio_content, file.content_type or "audio/wav")}
     data = {"model": "saaras:v3"}
-    
+    transcript = ""
+
     try:
         print("Sending audio to Sarvam AI...")
         # Sarvam STT requires language_code
         data["language_code"] = "hi-IN"
+        t_stt = time.perf_counter()
         response = requests.post(sarvam_url, headers=headers, files=files, data=data)
+        stt_ms = (time.perf_counter() - t_stt) * 1000
+        tlog(req_id, "sarvam_stt", stt_ms)
         response.raise_for_status()
         sarvam_data = response.json()
         transcript = sarvam_data.get("transcript", "").strip()
@@ -429,7 +592,7 @@ async def process_raw_audio(file: UploadFile = File(...)):
             "synthesized_answer": f"Failed to transcribe audio: {e.response.text}",
             "status": "UNANSWERABLE",
             "evidence_shards": [],
-            "latency_ms": 0
+            "latency_ms": 0,
         }
     except Exception as e:
         print(f"Sarvam API Error: {e}")
@@ -438,28 +601,30 @@ async def process_raw_audio(file: UploadFile = File(...)):
             "synthesized_answer": "Failed to transcribe audio.",
             "status": "UNANSWERABLE",
             "evidence_shards": [],
-            "latency_ms": 0
+            "latency_ms": 0,
         }
-        
+
     if not transcript:
         return {
             "transcript": "",
             "synthesized_answer": "Could not transcribe audio.",
             "status": "UNANSWERABLE",
             "evidence_shards": [],
-            "latency_ms": 0
+            "latency_ms": 0,
         }
 
     try:
         print("Translating query to Hindi...")
-        hindi_query = groq_translate_to_hindi(transcript)
+        t_tr = time.perf_counter()
+        hindi_query = groq_translate_to_hindi(transcript, req_id)
+        tlog(req_id, "translate_stage", (time.perf_counter() - t_tr) * 1000)
         print(f"Translated query: {hindi_query}")
     except Exception as e:
         print(f"Translation Error: {e}")
         hindi_query = transcript
-        
-    search_result, _ = retrieve_context(hindi_query)
-    
+
+    search_result, _ = retrieve_context(hindi_query, req_id)
+
     if not search_result or search_result[0].score < 0.45:
         latency = round((time.time() - total_start_time) * 1000, 2)
         request_latencies.append(latency)
@@ -468,29 +633,32 @@ async def process_raw_audio(file: UploadFile = File(...)):
             "synthesized_answer": "मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली। कृपया कोई दूसरा सवाल पूछें।",
             "status": "UNANSWERABLE",
             "evidence_shards": [],
-            "latency_ms": latency
+            "latency_ms": latency,
         }
-        
+
     retrieved_shards = [hit.payload.get("text", "") for hit in search_result]
     context_text = "\n\n".join(retrieved_shards)
-    
+
     try:
         print("Generating answer...")
-        rag_res = groq_generate_answer(context_text, hindi_query)
+        t_llm = time.perf_counter()
+        rag_res, _, _ = groq_generate_answer(context_text, hindi_query, req_id)
+        tlog(req_id, "llm_stage", (time.perf_counter() - t_llm) * 1000)
         ans = rag_res.synthesized_answer
         status = rag_res.status
     except Exception as e:
         print(f"Generation Error: {e}")
         ans = "Error generating answer."
         status = "UNANSWERABLE"
-        
-    latency = round((time.time() - total_start_time) * 1000, 2)
+
+    latency = round((time.perf_counter() - total_start_time) * 1000, 2)
     request_latencies.append(latency)
-    
+    tlog(req_id, "endpoint_total", latency, extra="path=/api/voice")
+
     return {
         "transcript": transcript,
         "synthesized_answer": ans,
         "status": status,
         "evidence_shards": retrieved_shards,
-        "latency_ms": latency
+        "latency_ms": latency,
     }
