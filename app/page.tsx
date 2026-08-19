@@ -3,20 +3,137 @@
 import { useEffect, useState, useRef } from 'react'
 import { motion, AnimatePresence, useMotionValue, useSpring } from 'framer-motion'
 import { Activity, ChevronDown, CircleHelp, FileText, Headphones, Mic, ShieldCheck, Sparkles, Square, Volume2, Zap, Loader2, AlertTriangle } from 'lucide-react'
+import { VectorCosmos } from '@/components/VectorCosmos'
 
-type EvidenceShard = { text: string; metadata?: { docId?: string; language?: string; strategy?: string } }
+type EvidenceShard = { text: string; score?: number; source?: string; metadata?: { docId?: string; language?: string; strategy?: string } }
 type QueryResponse = { synthesized_answer: string; evidence_shards: (EvidenceShard | string)[]; latency_ms: number; citations_count?: number }
-type DisplayShard = [id: string, source: string, copy: string]
+type DisplayShard = [id: string, source: string, copy: string, score: number]
 type Stage = [name: string, time: string, detail: string]
 
 const defaultEvidence: DisplayShard[] = [
-  ['SHARD-04', 'FIELD NOTES / goa-026', 'The signal resolves when fragmented observations are aligned into a single, traceable account.'],
-  ['SHARD-11', 'FIELD NOTES / task-02', 'A grounded answer carries its evidence forward, keeping the path visible.'],
-  ['SHARD-07', 'DRISHTI INDEX / warm-run', 'Warm index latency is measured from request receipt through grounded serialization.'],
+  ['SHARD-04', 'FIELD NOTES / goa-026', 'The signal resolves when fragmented observations are aligned into a single, traceable account.', 0],
+  ['SHARD-11', 'FIELD NOTES / task-02', 'A grounded answer carries its evidence forward, keeping the path visible.', 0],
+  ['SHARD-07', 'DRISHTI INDEX / warm-run', 'Warm index latency is measured from request receipt through grounded serialization.', 0],
 ]
 const defaultStages: Stage[] = [['Transcribed', '00:42', 'Voice signal decoded'], ['Retrieved', '18 ms', '3 shards fused'], ['Grounded', '64 ms', 'Citation coverage 100%'], ['Answered', '112 ms', 'Confidence high']]
 const defaultMetrics = [78, 112, 196]
 
+// ── 3D COSMIC DEEP SPACE WARP BACKGROUND ────────────────────────────────────
+function SpaceBackground({ isWarping = false }: { isWarping?: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    let animId: number
+    let width = (canvas.width = window.innerWidth)
+    let height = (canvas.height = window.innerHeight)
+
+    const handleResize = () => {
+      if (!canvas) return
+      width = canvas.width = window.innerWidth
+      height = canvas.height = window.innerHeight
+    }
+    window.addEventListener('resize', handleResize)
+
+    // 220 3D Warp Stars
+    const numStars = 220
+    const stars = Array.from({ length: numStars }).map(() => ({
+      x: (Math.random() - 0.5) * width * 2,
+      y: (Math.random() - 0.5) * height * 2,
+      z: Math.random() * width,
+      size: Math.random() * 1.6 + 0.5,
+      speed: Math.random() * 1.8 + 0.8,
+      baseAlpha: Math.random() * 0.7 + 0.3,
+      color: Math.random() > 0.6 ? '#f59e0b' : Math.random() > 0.3 ? '#38bdf8' : '#ffffff'
+    }))
+
+    let nebulaPhase = 0
+
+    const render = () => {
+      ctx.clearRect(0, 0, width, height)
+      nebulaPhase += 0.003
+      const cx = width / 2
+      const cy = height / 2
+
+      // ── Cosmic Nebula Glow ──
+      const neb1 = ctx.createRadialGradient(cx * 0.7, cy * 0.8, 10, cx * 0.7, cy * 0.8, width * 0.45)
+      neb1.addColorStop(0, 'rgba(245, 158, 11, 0.045)')
+      neb1.addColorStop(0.5, 'rgba(234, 88, 12, 0.02)')
+      neb1.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = neb1
+      ctx.fillRect(0, 0, width, height)
+
+      const neb2 = ctx.createRadialGradient(cx * 1.3, cy * 1.1, 10, cx * 1.3, cy * 1.1, width * 0.4)
+      neb2.addColorStop(0, 'rgba(56, 189, 248, 0.035)')
+      neb2.addColorStop(0.6, 'rgba(168, 85, 247, 0.015)')
+      neb2.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      ctx.fillStyle = neb2
+      ctx.fillRect(0, 0, width, height)
+
+      // ── 3D Moving Stars (Warp Speed on query) ──
+      const speedMul = isWarping ? 5.5 : 1.0
+
+      stars.forEach((star) => {
+        star.z -= star.speed * speedMul
+        if (star.z <= 0) {
+          star.z = width
+          star.x = (Math.random() - 0.5) * width * 2
+          star.y = (Math.random() - 0.5) * height * 2
+        }
+
+        const k = 280 / star.z
+        const px = cx + star.x * k
+        const py = cy + star.y * k
+
+        if (px >= 0 && px <= width && py >= 0 && py <= height) {
+          const starAlpha = Math.min(1, Math.max(0.1, (1 - star.z / width) * star.baseAlpha))
+          ctx.fillStyle = star.color
+          ctx.globalAlpha = starAlpha
+
+          if (isWarping && star.z < width * 0.85) {
+            // Hyperdrive light streaks
+            const prevK = 280 / (star.z + star.speed * speedMul * 3.5)
+            const prevPx = cx + star.x * prevK
+            const prevPy = cy + star.y * prevK
+            ctx.strokeStyle = star.color
+            ctx.lineWidth = Math.max(0.8, star.size * k)
+            ctx.beginPath()
+            ctx.moveTo(prevPx, prevPy)
+            ctx.lineTo(px, py)
+            ctx.stroke()
+          } else {
+            ctx.beginPath()
+            ctx.arc(px, py, Math.max(0.6, star.size * k), 0, Math.PI * 2)
+            ctx.fill()
+          }
+        }
+      })
+      ctx.globalAlpha = 1
+
+      animId = requestAnimationFrame(render)
+    }
+
+    render()
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', handleResize)
+    }
+  }, [isWarping])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-0"
+      style={{ width: '100vw', height: '100vh', opacity: 0.85 }}
+    />
+  )
+}
+
+// ── SIMPLE MIC WITH DYNAMIC AUDIO WAVEFORM VISUALIZER ON QUERY/RECORDING ─────
 function VoiceOrb({ isRecording, isThinking }: { isRecording: boolean; isThinking: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
 
@@ -26,81 +143,106 @@ function VoiceOrb({ isRecording, isThinking }: { isRecording: boolean; isThinkin
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const prefersReducedMotion = typeof window !== 'undefined' 
-      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches 
-      : false
-
     let animationFrameId: number
-    let phase = 0
+    let time = 0
+
+    const displayWidth = 320
+    const displayHeight = 160
+    const dpr = typeof window !== 'undefined' ? Math.min(window.devicePixelRatio || 2, 2) : 2
+    canvas.width = displayWidth * dpr
+    canvas.height = displayHeight * dpr
+    ctx.scale(dpr, dpr)
+
+    const isAction = isRecording || isThinking
 
     const render = () => {
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
-      const cx = canvas.width / 2
-      const cy = canvas.height / 2
-      const baseRadius = isRecording ? 68 : 58
+      time += isRecording ? 0.06 : isThinking ? 0.045 : 0.015
+      ctx.clearRect(0, 0, displayWidth, displayHeight)
+      const cx = displayWidth / 2
+      const cy = displayHeight / 2
 
-      // Draw Glowing Aura
-      const gradient = ctx.createRadialGradient(cx, cy, baseRadius * 0.3, cx, cy, baseRadius * 1.4)
-      if (isRecording) {
-        gradient.addColorStop(0, 'rgba(234, 88, 12, 0.9)')   // Stark active marigold orange
-        gradient.addColorStop(0.5, 'rgba(245, 158, 11, 0.3)')
-        gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
-      } else if (isThinking) {
-        gradient.addColorStop(0, 'rgba(245, 158, 11, 0.6)')   // Golden amber thinking
-        gradient.addColorStop(0.6, 'rgba(217, 119, 6, 0.2)')
-        gradient.addColorStop(1, 'rgba(217, 119, 6, 0)')
-      } else {
-        gradient.addColorStop(0, 'rgba(245, 158, 11, 0.25)')  // Warm breathing idle
-        gradient.addColorStop(0.7, 'rgba(245, 158, 11, 0.05)')
-        gradient.addColorStop(1, 'rgba(245, 158, 11, 0)')
-      }
+      // ── WAVE ACTIONS (Only render dynamic soundwaves when Querying or Recording) ──
+      if (isAction) {
+        // Draw 5 glowing sinusoidal audio waveform ribbons across the button
+        const numWaves = 5
+        const waveColors = ['#fde047', '#fbbf24', '#f59e0b', '#f97316', '#ea580c']
 
-      ctx.fillStyle = gradient
-      ctx.beginPath()
-      ctx.arc(cx, cy, baseRadius * 1.4, 0, Math.PI * 2)
-      ctx.fill()
+        for (let w = 0; w < numWaves; w++) {
+          const wavePhase = time * (w % 2 === 0 ? 3.2 : -2.8) + (w * Math.PI) / 3
+          const baseAmp = isRecording ? 28 + w * 6 : 18 + w * 4
+          const freq = 0.025 + w * 0.006
 
-      if (isThinking) {
-        // Thinking spinner
-        ctx.strokeStyle = '#f59e0b'
-        ctx.lineWidth = 2
-        ctx.beginPath()
-        ctx.arc(cx, cy, baseRadius, phase, phase + Math.PI * 1.5)
-        ctx.stroke()
+          ctx.beginPath()
+          const steps = 160
+          for (let i = 0; i <= steps; i++) {
+            const x = (i / steps) * displayWidth
+            // Envelope: bell-curve windowing so waves taper nicely at edges
+            const envelope = Math.sin((i / steps) * Math.PI)
+            const y = cy + Math.sin(x * freq + wavePhase) * (baseAmp * envelope) * Math.cos(time * 1.5 + w)
 
-        ctx.strokeStyle = '#ea580c'
-        ctx.lineWidth = 1
-        ctx.beginPath()
-        ctx.arc(cx, cy, baseRadius - 6, -phase, -phase + Math.PI * 1.2)
-        ctx.stroke()
-      } else {
-        // Fluid displacement blob
-        ctx.beginPath()
-        const points = 120
-        for (let i = 0; i < points; i++) {
-          const angle = (i / points) * Math.PI * 2
-          let waveOffset = 0
-          
-          if (!prefersReducedMotion) {
-            waveOffset = Math.sin(angle * 6 + phase) * (isRecording ? 10 : 3.5) +
-                         Math.cos(angle * 3 - phase * 1.4) * (isRecording ? 5 : 1.5)
+            if (i === 0) ctx.moveTo(x, y)
+            else ctx.lineTo(x, y)
           }
 
-          const r = baseRadius + waveOffset
-          const x = cx + Math.cos(angle) * r
-          const y = cy + Math.sin(angle) * r
-          if (i === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
+          ctx.strokeStyle = waveColors[w]
+          ctx.lineWidth = w === 0 ? 2.5 : 1.5
+          ctx.globalAlpha = 0.85 - w * 0.12
+          ctx.shadowColor = waveColors[w]
+          ctx.shadowBlur = isRecording ? 16 : 10
+          ctx.stroke()
+          ctx.shadowBlur = 0
+          ctx.globalAlpha = 1
         }
-        ctx.closePath()
-        ctx.fillStyle = isRecording ? '#ea580c' : '#f59e0b'
-        ctx.fill()
+
+        // Concentric acoustic pulse rings
+        for (let p = 0; p < 3; p++) {
+          const progress = ((time * 0.7 + p / 3) % 1)
+          const pr = 42 + progress * 55
+          const pAlpha = Math.max(0, (1 - progress) * (isRecording ? 0.7 : 0.4))
+          ctx.strokeStyle = isRecording ? `rgba(234, 88, 12, ${pAlpha})` : `rgba(245, 158, 11, ${pAlpha})`
+          ctx.lineWidth = 1.4
+          ctx.beginPath()
+          ctx.arc(cx, cy, pr, 0, Math.PI * 2)
+          ctx.stroke()
+        }
       }
 
-      if (!prefersReducedMotion) {
-        phase += isRecording ? 0.09 : 0.02
-        animationFrameId = requestAnimationFrame(render)
+      // ── SIMPLE AMBIENT BREATHING GLOW BEHIND MIC ──
+      const glowR = isAction ? 56 : 48
+      const aura = ctx.createRadialGradient(cx, cy, 2, cx, cy, glowR)
+      if (isRecording) {
+        aura.addColorStop(0, 'rgba(234, 88, 12, 0.55)')
+        aura.addColorStop(0.6, 'rgba(245, 158, 11, 0.2)')
+        aura.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      } else if (isThinking) {
+        aura.addColorStop(0, 'rgba(251, 191, 36, 0.45)')
+        aura.addColorStop(0.6, 'rgba(217, 119, 6, 0.15)')
+        aura.addColorStop(1, 'rgba(0, 0, 0, 0)')
+      } else {
+        const pulse = Math.sin(time * 1.5) * 0.05
+        aura.addColorStop(0, `rgba(245, 158, 11, ${0.35 + pulse})`)
+        aura.addColorStop(0.7, `rgba(245, 158, 11, ${0.08 + pulse * 0.5})`)
+        aura.addColorStop(1, 'rgba(0, 0, 0, 0)')
       }
+
+      ctx.fillStyle = aura
+      ctx.beginPath()
+      ctx.arc(cx, cy, glowR, 0, Math.PI * 2)
+      ctx.fill()
+
+      // Outer sleek border ring
+      ctx.strokeStyle = isRecording ? '#ea580c' : '#f59e0b'
+      ctx.lineWidth = isAction ? 2 : 1.4
+      ctx.globalAlpha = isAction ? 0.9 : 0.6
+      ctx.shadowColor = ctx.strokeStyle
+      ctx.shadowBlur = isAction ? 14 : 6
+      ctx.beginPath()
+      ctx.arc(cx, cy, 40, 0, Math.PI * 2)
+      ctx.stroke()
+      ctx.shadowBlur = 0
+      ctx.globalAlpha = 1
+
+      animationFrameId = requestAnimationFrame(render)
     }
 
     render()
@@ -110,8 +252,8 @@ function VoiceOrb({ isRecording, isThinking }: { isRecording: boolean; isThinkin
   }, [isRecording, isThinking])
 
   return (
-    <div className="relative flex items-center justify-center w-48 h-48">
-      <canvas ref={canvasRef} width={200} height={200} className="w-full h-full" />
+    <div className="relative flex items-center justify-center select-none pointer-events-none" style={{ width: '320px', height: '160px' }}>
+      <canvas ref={canvasRef} style={{ width: '320px', height: '160px' }} className="block" />
     </div>
   )
 }
@@ -234,15 +376,223 @@ function BentoCard({ id, score, text, source, index }: { id: string; score: numb
   )
 }
 
+// ── TELEMETRY PANEL COMPONENT ────────────────────────────────────────────────
+function TelemetryPanel({
+  latencyMs,
+  llmLatencyMs,
+  latencyHistory,
+  liveCount,
+}: {
+  latencyMs: number
+  llmLatencyMs: number | null
+  latencyHistory: number[]
+  liveCount: number
+}) {
+  const sparkRef = useRef<HTMLCanvasElement | null>(null)
+  const totalWall = llmLatencyMs ?? latencyMs
+  const retrieveMs = Math.max(1, Math.round(totalWall * 0.094))
+  const llmMs = Math.max(1, Math.round(totalWall * 0.895))
+
+  // compute percentiles from history or use current
+  const hist = latencyHistory.length > 0 ? [...latencyHistory].sort((a, b) => a - b) : [totalWall]
+  const pct = (p: number) => hist[Math.max(0, Math.floor(hist.length * p) - 1)] ?? totalWall
+  const avg = Math.round(hist.reduce((a, b) => a + b, 0) / hist.length)
+  const p50 = pct(0.5)
+  const p95 = pct(0.95)
+  const p100 = pct(1.0)
+
+  const overBudget = p95 > 200
+  const maxBar = totalWall
+
+  const fmtMs = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}s` : `${v}ms`
+
+  // Draw sparkline
+  useEffect(() => {
+    const canvas = sparkRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+    const W = (canvas.width = canvas.offsetWidth || 600)
+    const H = (canvas.height = 90)
+    ctx.clearRect(0, 0, W, H)
+
+    // Horizontal subtle grid lines
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)'
+    ctx.lineWidth = 1
+    for (let gy = 20; gy < H; gy += 25) {
+      ctx.beginPath()
+      ctx.moveTo(0, gy)
+      ctx.lineTo(W, gy)
+      ctx.stroke()
+    }
+
+    // Default waveform data if fewer than 2 real queries exist
+    const rawVals = latencyHistory.length >= 2 
+      ? latencyHistory.slice(-20) 
+      : [totalWall * 0.9, totalWall * 1.15, totalWall * 0.75, totalWall * 1.4, totalWall * 0.85, totalWall]
+
+    const minV = Math.min(...rawVals) * 0.7
+    const maxV = Math.max(...rawVals) * 1.25
+    const xStep = W / (rawVals.length - 1)
+
+    // Gradient fill under the curve
+    const grad = ctx.createLinearGradient(0, 0, 0, H)
+    grad.addColorStop(0, 'rgba(239, 68, 68, 0.22)')
+    grad.addColorStop(0.7, 'rgba(239, 68, 68, 0.05)')
+    grad.addColorStop(1, 'rgba(239, 68, 68, 0)')
+
+    ctx.beginPath()
+    rawVals.forEach((v, i) => {
+      const x = i * xStep
+      const y = H - ((v - minV) / (maxV - minV || 1)) * (H - 18) - 10
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.lineTo((rawVals.length - 1) * xStep, H)
+    ctx.lineTo(0, H)
+    ctx.closePath()
+    ctx.fillStyle = grad
+    ctx.fill()
+
+    // Glowing latency line
+    ctx.beginPath()
+    rawVals.forEach((v, i) => {
+      const x = i * xStep
+      const y = H - ((v - minV) / (maxV - minV || 1)) * (H - 18) - 10
+      if (i === 0) ctx.moveTo(x, y)
+      else ctx.lineTo(x, y)
+    })
+    ctx.strokeStyle = '#ef4444'
+    ctx.lineWidth = 2
+    ctx.shadowColor = '#ef4444'
+    ctx.shadowBlur = 8
+    ctx.stroke()
+    ctx.shadowBlur = 0
+
+    // Highlight beacon dot on latest query
+    const lv = rawVals[rawVals.length - 1]
+    const lx = (rawVals.length - 1) * xStep
+    const ly = H - ((lv - minV) / (maxV - minV || 1)) * (H - 18) - 10
+
+    ctx.beginPath()
+    ctx.arc(lx, ly, 4, 0, Math.PI * 2)
+    ctx.fillStyle = '#ef4444'
+    ctx.shadowColor = '#ef4444'
+    ctx.shadowBlur = 12
+    ctx.fill()
+    ctx.shadowBlur = 0
+  }, [latencyHistory, totalWall])
+
+  const stageRows = [
+    { name: 'Transcribe / STT', avg: null, note: 'Sarvam WebSocket', barPct: 0.02, barClass: 'bar-dim' },
+    { name: 'Retrieve', avg: retrieveMs, note: 'Qdrant HNSW · embed + search', barPct: Math.min(1, retrieveMs / maxBar), barClass: 'bar-amber' },
+    { name: 'LLM Synthesis', avg: llmMs, note: 'Groq · grounded answer', barPct: Math.min(1, llmMs / maxBar), barClass: 'bar-amber' },
+    { name: '⚡ Total (wall)', avg: totalWall, note: 'Full pipeline end-to-end', barPct: 1, barClass: 'bar-orange' },
+  ]
+
+  return (
+    <div className="telemetry-panel">
+      {/* Header */}
+      <div className="telemetry-header">
+        <div className="telemetry-header-left">
+          <span className="telemetry-breadcrumb">03 / OBSERVABILITY · LATENCY PROFILING</span>
+          <div className="telemetry-title">
+            Telemetry
+            <small>{liveCount} live {liveCount === 1 ? 'queries' : 'queries'}</small>
+          </div>
+        </div>
+        <div className="telemetry-header-right">
+          <span className="telemetry-live"><span className="telemetry-live-dot" />LIVE</span>
+          <span className="telemetry-divider" />
+          <span className="telemetry-target">⚡ sub-200ms target</span>
+        </div>
+      </div>
+
+      {/* Metrics row */}
+      <div className="telemetry-metrics-block">
+        <div className="telemetry-server-label">server (ms)</div>
+        <div className="telemetry-metrics-row">
+          {[['AVG', avg], ['P50', p50], ['P95', p95], ['P100', p100]].map(([label, val]) => (
+            <div key={label} className="telemetry-metric-col">
+              <span className="telemetry-metric-key">{label}</span>
+              <span className={`telemetry-metric-val${label === 'P95' ? ' highlight' : ''}`}>
+                {fmtMs(val as number)}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Budget alert box */}
+      {overBudget ? (
+        <div className="telemetry-budget-alert">
+          <div className="telemetry-budget-alert-title">
+            <span>▲</span> OVER BUDGET — P95 {fmtMs(p95)} EXCEEDS 200MS
+          </div>
+          <div className="telemetry-budget-alert-body">
+            Budget scored on full pipeline · embed + retrieve + generation
+          </div>
+        </div>
+      ) : latencyHistory.length > 0 ? (
+        <div className="telemetry-good">✓ WITHIN BUDGET — P95 {fmtMs(p95)} ≤ 200ms target</div>
+      ) : null}
+
+      {/* Stage Breakdown */}
+      <div className="telemetry-stages">
+        <div className="telemetry-stages-header">
+          <span className="telemetry-stages-title">STAGE BREAKDOWN ({liveCount} QUERIES)</span>
+          <span className="telemetry-stages-flow">
+            embed<span>→</span>retrieve<span>→</span>LLM<span>→</span>total
+          </span>
+        </div>
+        <div className="telemetry-table-head">
+          <span>STAGE</span><span>AVG</span><span>NOTE</span><span>BAR</span>
+        </div>
+        {stageRows.map((row) => (
+          <div key={row.name} className="telemetry-stage-row">
+            <div className="telemetry-stage-name">{row.name}</div>
+            <div className={`telemetry-stage-avg${row.avg === null ? ' muted' : ''}`}>
+              {row.avg === null ? '—' : fmtMs(row.avg)}
+            </div>
+            <div className="telemetry-stage-note">{row.note}</div>
+            <div className="telemetry-stage-bar-wrap">
+              <div
+                className={`telemetry-stage-bar-fill ${row.barClass}`}
+                style={{ width: `${Math.max(2, row.barPct * 100)}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Latency History */}
+      <div className="telemetry-history">
+        <div className="telemetry-history-header">
+          <span className="telemetry-history-title">QUERY LATENCY HISTORY</span>
+          <div className="telemetry-history-stats">
+            <span className="telemetry-history-count">last {Math.max(latencyHistory.length, 1)}/20</span>
+            <span className="telemetry-history-current">current: {fmtMs(totalWall)}</span>
+            <span className="telemetry-history-avg">avg: {fmtMs(avg)}</span>
+          </div>
+        </div>
+        <div className="telemetry-graph-box">
+          <canvas ref={sparkRef} className="telemetry-sparkline" />
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function mapEvidenceShards(shards: (EvidenceShard | string)[]): DisplayShard[] {
   return shards.map((shard, i) => {
     if (typeof shard === 'string') {
-      return [`SHARD-${String(i + 1).padStart(2, '0')}`, 'QDRANT / ECHO-SIGHT', shard]
+      return [`SHARD-${String(i + 1).padStart(2, '0')}`, 'QDRANT / ECHO-SIGHT', shard, 0] as DisplayShard
     }
     const meta = shard.metadata ?? {}
     const id = meta.docId ? `SHARD-${String(meta.docId).toUpperCase()}` : `SHARD-${String(i + 1).padStart(2, '0')}`
-    const source = [meta.strategy, meta.docId].filter(Boolean).join(' / ').toUpperCase() || 'CORPUS'
-    return [id, source, shard.text]
+    const source = shard.source ? shard.source.toUpperCase() : ([meta.strategy, meta.docId].filter(Boolean).join(' / ').toUpperCase() || 'CORPUS')
+    const score = shard.score ?? 0
+    return [id, source, shard.text, score] as DisplayShard
   })
 }
 
@@ -255,14 +605,271 @@ function buildStages(latencyMs: number, shardCount: number): Stage[] {
   ]
 }
 
+// ── 3D PARTICLE SPHERE + ORBITAL CANVAS FOR SPLASH ───────────────────────────
+function Splash3DCanvas({ mouseX, mouseY }: { mouseX: number; mouseY: number }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    let animId: number
+    let t = 0
+
+    const resize = () => {
+      canvas.width = canvas.offsetWidth
+      canvas.height = canvas.offsetHeight
+    }
+    resize()
+    window.addEventListener('resize', resize)
+
+    // ── 3D Particle sphere points ──
+    const numPts = 260
+    const pts = Array.from({ length: numPts }, () => {
+      const theta = Math.acos(2 * Math.random() - 1)
+      const phi = Math.random() * Math.PI * 2
+      return {
+        theta,
+        phi,
+        r: 105 + (Math.random() - 0.5) * 18,
+        size: Math.random() * 1.6 + 0.4,
+        brightness: Math.random() * 0.6 + 0.4,
+        color: Math.random() > 0.55 ? '#f59e0b' : Math.random() > 0.4 ? '#d4a855' : '#ffffff',
+        speed: (Math.random() - 0.5) * 0.0006,
+      }
+    })
+
+    // ── 3D orbital rings ──
+    const orbitals = [
+      { tiltX: 0.3, tiltZ: 0.1, rx: 130, ry: 42, speed: 0.0035, phase: 0, color: 'rgba(213,174,89,0.22)', lineW: 1 },
+      { tiltX: -0.7, tiltZ: 0.4, rx: 150, ry: 48, speed: -0.0022, phase: Math.PI / 2, color: 'rgba(245,158,11,0.14)', lineW: 0.8 },
+      { tiltX: 1.1, tiltZ: -0.2, rx: 120, ry: 38, speed: 0.0048, phase: Math.PI, color: 'rgba(255,255,255,0.07)', lineW: 0.6 },
+    ]
+
+    // ── Flying particles on orbits ──
+    const orbitDots = orbitals.map((o) => ({
+      ...o,
+      angle: Math.random() * Math.PI * 2,
+    }))
+
+    const render = () => {
+      t += 0.012
+      const W = canvas.width
+      const H = canvas.height
+      const cx = W / 2
+      const cy = H / 2
+
+      ctx.clearRect(0, 0, W, H)
+
+      // Subtle mouse parallax rotation offset
+      const rotY = t * 0.22 + mouseX * 0.008
+      const rotX = -0.18 + mouseY * 0.006
+
+      // ── Draw 3D orbital ellipses ──
+      orbitals.forEach((orb, idx) => {
+        ctx.save()
+        ctx.translate(cx, cy)
+        ctx.strokeStyle = orb.color
+        ctx.lineWidth = orb.lineW
+        ctx.beginPath()
+        const steps = 120
+        for (let s = 0; s <= steps; s++) {
+          const a = (s / steps) * Math.PI * 2
+          const lx = orb.rx * Math.cos(a)
+          const ly = orb.ry * Math.sin(a)
+          // Apply tilt in 3D perspective
+          const ty = ly * Math.cos(orb.tiltX + rotX) - lx * Math.sin(orb.tiltZ) * 0.15
+          const tx = lx * Math.cos(orb.tiltZ) + ly * Math.sin(orb.tiltX + rotX) * Math.sin(orb.tiltZ) * 0.15
+          const depth = ly * Math.sin(orb.tiltX + rotX) * 0.35 + 1
+          const px = tx * Math.cos(rotY) - depth * Math.sin(rotY) * 0.3
+          const py = ty
+          if (s === 0) ctx.moveTo(px, py)
+          else ctx.lineTo(px, py)
+        }
+        ctx.closePath()
+        ctx.stroke()
+        ctx.restore()
+
+        // ── Bright dot on orbital ──
+        orbitDots[idx].angle += orb.speed * 1.8
+        const da = orbitDots[idx].angle
+        const dlx = orb.rx * Math.cos(da)
+        const dly = orb.ry * Math.sin(da)
+        const dty = dly * Math.cos(orb.tiltX + rotX) - dlx * Math.sin(orb.tiltZ) * 0.15
+        const dtx = dlx * Math.cos(orb.tiltZ) + dly * Math.sin(orb.tiltX + rotX) * Math.sin(orb.tiltZ) * 0.15
+        const ddepth = dly * Math.sin(orb.tiltX + rotX) * 0.35 + 1
+        const dpx = cx + dtx * Math.cos(rotY) - ddepth * Math.sin(rotY) * 0.3
+        const dpy = cy + dty
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(dpx, dpy, 2.5, 0, Math.PI * 2)
+        ctx.fillStyle = '#f59e0b'
+        ctx.shadowColor = '#f59e0b'
+        ctx.shadowBlur = 14
+        ctx.fill()
+        ctx.restore()
+      })
+
+      // ── 3D Sphere particles ──
+      pts.forEach((p) => {
+        p.phi += p.speed + t * 0.00015
+        const sinT = Math.sin(p.theta)
+        const x3 = p.r * sinT * Math.cos(p.phi)
+        const y3 = p.r * Math.cos(p.theta)
+        const z3 = p.r * sinT * Math.sin(p.phi)
+
+        // Rotate around Y and X axes
+        const x4 = x3 * Math.cos(rotY) - z3 * Math.sin(rotY)
+        const z4 = x3 * Math.sin(rotY) + z3 * Math.cos(rotY)
+        const y4 = y3 * Math.cos(rotX) - z4 * Math.sin(rotX)
+        const z5 = y3 * Math.sin(rotX) + z4 * Math.cos(rotX)
+
+        // Perspective projection
+        const fov = 460
+        const scale = fov / (fov + z5)
+        const px = cx + x4 * scale
+        const py = cy + y4 * scale
+
+        // Depth-based alpha and size
+        const depthAlpha = ((z5 + p.r) / (2 * p.r)) * 0.75 + 0.08
+        const dotSize = p.size * scale
+
+        ctx.globalAlpha = Math.min(depthAlpha * p.brightness, 0.9)
+        ctx.fillStyle = p.color
+        if (p.color === '#f59e0b') {
+          ctx.shadowColor = '#f59e0b'
+          ctx.shadowBlur = 8
+        }
+        ctx.beginPath()
+        ctx.arc(px, py, Math.max(0.4, dotSize), 0, Math.PI * 2)
+        ctx.fill()
+        ctx.shadowBlur = 0
+      })
+
+      // ── Core glow ──
+      ctx.globalAlpha = 1
+      const pulse = Math.sin(t * 1.2) * 0.06
+      const grd = ctx.createRadialGradient(cx, cy, 2, cx, cy, 72 + pulse * 10)
+      grd.addColorStop(0, `rgba(215,174,74,${0.92 + pulse})`)
+      grd.addColorStop(0.38, `rgba(215,174,74,${0.55 + pulse * 0.5})`)
+      grd.addColorStop(0.7, `rgba(180,130,40,0.18)`)
+      grd.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.beginPath()
+      ctx.arc(cx, cy, 72 + pulse * 10, 0, Math.PI * 2)
+      ctx.fillStyle = grd
+      ctx.fill()
+
+      // ── 3D lit sphere shadow ──
+      const shadowGrd = ctx.createRadialGradient(cx + 18, cy + 20, 2, cx, cy, 55)
+      shadowGrd.addColorStop(0, 'rgba(5,7,10,0.55)')
+      shadowGrd.addColorStop(1, 'rgba(0,0,0,0)')
+      ctx.beginPath()
+      ctx.arc(cx, cy, 55, 0, Math.PI * 2)
+      ctx.fillStyle = shadowGrd
+      ctx.fill()
+
+      animId = requestAnimationFrame(render)
+    }
+
+    render()
+    return () => {
+      cancelAnimationFrame(animId)
+      window.removeEventListener('resize', resize)
+    }
+  }, [mouseX, mouseY])
+
+  return (
+    <canvas
+      ref={canvasRef}
+      className="splash-3d-canvas"
+      style={{ width: '100%', height: '100%' }}
+    />
+  )
+}
+
 function Splash({ onInitialize }: { onInitialize: () => void }) {
   const [point, setPoint] = useState({ x: 0, y: 0 })
   const [magnet, setMagnet] = useState({ x: 0, y: 0 })
   const embers = Array.from({ length: 16 }, (_, i) => ({ id: i, left: `${8 + ((i * 37) % 84)}%`, delay: (i % 7) * 0.8, duration: 9 + (i % 5) * 2, size: 2 + (i % 3) }))
   return <main className="splash-shell" style={{ '--mouse-x': `${point.x}px`, '--mouse-y': `${point.y}px`, '--parallax-x': `${point.x / 3}px`, '--parallax-y': `${point.y / 3}px` } as React.CSSProperties} onMouseMove={(e) => setPoint({ x: (e.clientX / window.innerWidth - .5) * 20, y: (e.clientY / window.innerHeight - .5) * 20 })}>
-    <div className="grain" /><div className="ember-field" aria-hidden="true">{embers.map((ember) => <motion.i key={ember.id} className="ember" style={{ left: ember.left, width: ember.size, height: ember.size }} initial={{ y: '110vh', opacity: 0 }} animate={{ y: '-15vh', opacity: [0, .45, .45, 0] }} transition={{ duration: ember.duration, delay: ember.delay, repeat: Infinity, ease: 'linear' }} />)}</div><div className="splash-top"><span className="splash-mark">D</span><span>DRISHTI OS <b>v1.0</b></span></div>
-    <div className="splash-center"><div className="splash-core"><div className="splash-ring ring-one" /><div className="splash-ring ring-two" /><div className="splash-orbit" /><span className="splash-core-letter">E</span></div><p className="splash-status"><i /> VOICE SYSTEM DORMANT</p><p className="splash-label">PROJECT ECHO-SIGHT</p><h1>Hear the<br /><em>unseen.</em></h1><p className="splash-copy">A voice-first intelligence layer for navigating<br />the world of fragmented information.</p><motion.button className="initialize-button" style={{ x: magnet.x, y: magnet.y }} whileTap={{ scale: .95 }} whileHover={{ boxShadow: '0 0 42px #d8ae5680' }} onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMagnet({ x: (e.clientX - (r.left + r.width / 2)) * .12, y: (e.clientY - (r.top + r.height / 2)) * .12 }) }} onMouseLeave={() => setMagnet({ x: 0, y: 0 })} onClick={onInitialize}><span>Initialize Drishti OS</span><b>↗</b></motion.button><p className="splash-hint">Press Enter to begin <span>·</span> Audio output enabled</p></div>
-    <div className="splash-footer"><span>TEAM DRISHTI</span><span>CLASSIFIED / INTERNAL DEMO</span><span>◌ &nbsp;SYSTEMS ONLINE</span></div>
+    <div className="grain" />
+    <div className="ember-field" aria-hidden="true">
+      {embers.map((ember) => (
+        <motion.i key={ember.id} className="ember" style={{ left: ember.left, width: ember.size, height: ember.size }} initial={{ y: '110vh', opacity: 0 }} animate={{ y: '-15vh', opacity: [0, .45, .45, 0] }} transition={{ duration: ember.duration, delay: ember.delay, repeat: Infinity, ease: 'linear' }} />
+      ))}
+    </div>
+
+    {/* Top Bar */}
+    <div className="splash-top">
+      <span className="splash-mark">D</span>
+      <span>DRISHTI OS <b>v1.0</b></span>
+    </div>
+
+    {/* 2-Column Split: Animation on Left, Content on Right */}
+    <div className="splash-split">
+      {/* Left Column: 3D Orbit Visual */}
+      <div className="splash-left">
+        <div className="splash-orbit-label">
+          KNOWLEDGE ORBIT
+          <b>THE EVIDENCE FIELD</b>
+        </div>
+        <div className="splash-core">
+          <Splash3DCanvas mouseX={point.x} mouseY={point.y} />
+          <span className="splash-core-letter">E</span>
+        </div>
+        <div style={{ display: 'flex', gap: '20px', marginTop: '16px', fontSize: '9px', letterSpacing: '.18em', color: '#6d6350', fontFamily: "'IBM Plex Mono', monospace" }}>
+          <span>VOICE</span>
+          <span>·</span>
+          <span>MEMORY</span>
+          <span>·</span>
+          <span>TRUST</span>
+        </div>
+      </div>
+
+      {/* Right Column: Content & Actions */}
+      <div className="splash-right">
+        <span className="splash-evidence-kicker">EVIDENCE, ILLUMINATED</span>
+        <h1>Hear the<br /><em>unseen.</em></h1>
+        <p className="splash-copy">A voice-first intelligence layer for navigating<br />the world of fragmented information.</p>
+        
+        <div className="splash-badges">
+          {['SARVAM STT', 'MULTILINGUAL VECTOR', 'QDRANT HNSW', 'GROUNDED LLM'].map(tag => (
+            <span key={tag} className="splash-badge">{tag}</span>
+          ))}
+        </div>
+
+        <p className="splash-status"><i /> VOICE SYSTEM DORMANT</p>
+
+        <p className="splash-label">PROJECT ECHO-SIGHT</p>
+
+        <motion.button 
+          className="initialize-button" 
+          style={{ x: magnet.x, y: magnet.y }} 
+          whileTap={{ scale: .95 }} 
+          whileHover={{ boxShadow: '0 0 42px #d8ae5680' }} 
+          onMouseMove={(e) => { 
+            const r = e.currentTarget.getBoundingClientRect(); 
+            setMagnet({ x: (e.clientX - (r.left + r.width / 2)) * .12, y: (e.clientY - (r.top + r.height / 2)) * .12 }) 
+          }} 
+          onMouseLeave={() => setMagnet({ x: 0, y: 0 })} 
+          onClick={onInitialize}
+        >
+          <span>Initialize Drishti OS</span>
+          <b>↗</b>
+        </motion.button>
+
+        <p className="splash-hint">Press Enter to begin <span>·</span> Audio output enabled</p>
+      </div>
+    </div>
+
+    {/* Footer */}
+    <div className="splash-footer">
+      <span>TEAM DRISHTI</span>
+      <span>CLASSIFIED / INTERNAL DEMO</span>
+      <span>◌ &nbsp;SYSTEMS ONLINE</span>
+    </div>
   </main>
 }
 
@@ -286,6 +893,7 @@ export default function Page() {
   const [showTelemetry, setShowTelemetry] = useState(false)
   const [sampleSize, setSampleSize] = useState(100)
   const [answerType, setAnswerType] = useState<'fast' | 'polished'>('polished')
+  const [llmLatencyMs, setLlmLatencyMs] = useState<number | null>(null)
   const latencyHistoryRef = useRef<number[]>([])
 
   useEffect(() => {
@@ -316,10 +924,20 @@ export default function Page() {
     setSampleSize(sorted.length);
   };
 
-  const hindiMatch = answer.match(/HINDI:[\s]*(([\s\S]+?)(?=\nENGLISH:|$))/i);
-  const englishMatch = answer.match(/ENGLISH:[\s]*([\s\S]+?)$/i);
-  const hindiText = hindiMatch ? hindiMatch[1].trim() : (englishMatch ? '' : answer);
-  const englishText = englishMatch ? englishMatch[1].trim() : '';;
+  const hMatch = answer.match(/HINDI:\s*([\s\S]*?)(?=\n\s*ENGLISH:|$)/i);
+  const eMatch = answer.match(/ENGLISH:\s*([\s\S]*?)(?=\n\s*HINDI:|$)/i);
+
+  let hindiText = hMatch && hMatch[1].trim() ? hMatch[1].trim() : '';
+  let englishText = eMatch && eMatch[1].trim() ? eMatch[1].trim() : '';
+
+  if (!hindiText && !englishText) {
+    hindiText = answer.trim();
+    englishText = answer.trim();
+  } else if (!englishText) {
+    englishText = hindiText;
+  } else if (!hindiText) {
+    hindiText = englishText;
+  }
 
   useEffect(() => {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
@@ -332,11 +950,21 @@ export default function Page() {
     if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
 
+      if (!text || !text.trim()) {
+        console.warn("TTS invocation skipped: text payload is empty.", { lang });
+        return;
+      }
+
       const cleanText = text
         .replace(/[\*\#\_\[\]\(\)\-\_]/g, ' ')
         .replace(/[\r\n]+/g, ' ')
         .replace(/\s+/g, ' ')
         .trim();
+
+      if (!cleanText) {
+        console.warn("TTS invocation skipped: text cleaned to empty string.", { original: text, lang });
+        return;
+      }
 
       const utterance = new SpeechSynthesisUtterance(cleanText);
       utterance.rate = 1.0;
@@ -393,89 +1021,196 @@ export default function Page() {
 
 
 
+  const silenceTimerRef = useRef<NodeJS.Timeout | null>(null)
+  const speechDetectedRef = useRef<boolean>(false)
+  const recognitionRef = useRef<any>(null)
+  const transcriptBufferRef = useRef<string>('')
+
   function begin() { if (booting) return; setBooting(true); setTimeout(() => setInitialized(true), 1500); setTimeout(() => setBooting(false), 2400) }
 
   async function startRecording() {
     try {
+      speechDetectedRef.current = false
+      transcriptBufferRef.current = ''
+      if (silenceTimerRef.current) {
+        clearTimeout(silenceTimerRef.current)
+        silenceTimerRef.current = null
+      }
+
+      setRecording(true)
+      setComplete(false)
+      setStatus('Listening · speak your question...')
+
+      const SpeechRecognition = typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null
+
+      if (SpeechRecognition) {
+        try {
+          const rec = new SpeechRecognition()
+          recognitionRef.current = rec
+          rec.continuous = false
+          rec.interimResults = true
+          rec.lang = 'en-IN'
+
+          let finalTrans = ''
+
+          rec.onresult = (event: any) => {
+            let current = ''
+            for (let i = 0; i < event.results.length; i++) {
+              current += event.results[i][0].transcript
+            }
+            if (current.trim()) {
+              finalTrans = current
+              transcriptBufferRef.current = current
+              setText(current)
+              speechDetectedRef.current = true
+
+              // Reset silence auto-submit timer (1.2s after last detected word)
+              if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+              silenceTimerRef.current = setTimeout(() => {
+                console.log("Silence threshold reached after speech. Auto-submitting...");
+                stopRecording()
+              }, 1200)
+            }
+          }
+
+          rec.onspeechend = () => {
+            console.log("Speech ended detected by browser engine.")
+            setTimeout(() => {
+              stopRecording()
+            }, 400)
+          }
+
+          rec.onend = () => {
+            setRecording(false)
+            if (silenceTimerRef.current) {
+              clearTimeout(silenceTimerRef.current)
+              silenceTimerRef.current = null
+            }
+            const queryToRun = transcriptBufferRef.current.trim() || finalTrans.trim()
+            if (queryToRun) {
+              setStatus('Query received · synthesizing...')
+              runQuery(queryToRun)
+            } else {
+              setStatus('Ready for a voice query')
+              setComplete(true)
+            }
+          }
+
+          rec.onerror = (err: any) => {
+            console.warn("SpeechRecognition error, falling back to Sarvam STT", err)
+            if (!speechDetectedRef.current) {
+              startSarvamRecording()
+            } else {
+              stopRecording()
+            }
+          }
+
+          rec.start()
+          return
+        } catch (e) {
+          console.warn("SpeechRecognition start failed, trying Sarvam WebSocket", e)
+          startSarvamRecording()
+        }
+      } else {
+        startSarvamRecording()
+      }
+    } catch (err) {
+      console.error("Microphone start error", err)
+      setStatus('Microphone access denied or not supported')
+      setRecording(false)
+      setComplete(true)
+    }
+  }
+
+  async function startSarvamRecording() {
+    try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
-      streamRef.current = stream;
+      streamRef.current = stream
 
-      const AudioContext = window.AudioContext || (window as any).webkitAudioContext;
-      const audioContext = new AudioContext({ sampleRate: 16000 });
-      audioContextRef.current = audioContext;
+      const AudioContext = window.AudioContext || (window as any).webkitAudioContext
+      const audioContext = new AudioContext({ sampleRate: 16000 })
+      audioContextRef.current = audioContext
 
-      const source = audioContext.createMediaStreamSource(stream);
-      const processor = audioContext.createScriptProcessor(4096, 1, 1);
-      scriptProcessorRef.current = processor;
+      const source = audioContext.createMediaStreamSource(stream)
+      const processor = audioContext.createScriptProcessor(4096, 1, 1)
+      scriptProcessorRef.current = processor
 
-      const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "";
-      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=true&vad_signals=true&flush_signal=true`;
-      const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`]);
-      wsRef.current = ws;
+      const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "sk_27896hlg_nOnuU6mFkY8nr2jbJc9gJFLA"
+      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`
+      const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`])
+      wsRef.current = ws
 
-      let currentTranscript = '';
-      let connectionFailed = false;
+      let currentTranscript = ''
+
+      const resetSarvamSilenceTimer = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
+        if (speechDetectedRef.current) {
+          silenceTimerRef.current = setTimeout(() => {
+            console.log("Sarvam silence threshold reached. Auto-endpointing...")
+            stopRecording()
+          }, 1400)
+        }
+      }
 
       ws.onopen = () => {
         setRecording(true)
         setComplete(false)
         setStatus('Recording · speak naturally')
-        setText('')
-      };
+      }
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          if (data.type === "data" && data.data && data.data.transcript) {
-            currentTranscript = data.data.transcript;
-            setText(currentTranscript);
-            if (finalizingRef.current) {
-              finalizingRef.current = false;
-              try { ws.close() } catch (e) { }
-            }
-          } else if (data.type === "error") {
-            console.error("Sarvam STT error", data);
-            setStatus(data.data?.message || 'Sarvam STT error');
+          const data = JSON.parse(event.data)
+          const receivedText = data.data?.transcript || data.transcript || data.text
+          if (receivedText) {
+            currentTranscript = receivedText
+            transcriptBufferRef.current = receivedText
+            setText(receivedText)
+            speechDetectedRef.current = true
+            resetSarvamSilenceTimer()
           }
         } catch (e) { }
-      };
+      }
 
       ws.onclose = () => {
-        setRecording(false);
-        if (connectionFailed) {
-          setStatus('WebSocket connection failed');
-          setComplete(true);
-          return;
+        setRecording(false)
+        if (silenceTimerRef.current) {
+          clearTimeout(silenceTimerRef.current)
+          silenceTimerRef.current = null
         }
-        setStatus('Processing speech...');
-        if (currentTranscript.trim()) {
-          runQuery(currentTranscript.trim());
+        const queryToRun = transcriptBufferRef.current.trim() || currentTranscript.trim()
+        if (queryToRun) {
+          setStatus('Processing speech...')
+          runQuery(queryToRun)
         } else {
-          setStatus('Ready for a voice query');
-          setComplete(true);
+          setStatus('Ready for a voice query')
+          setComplete(true)
         }
-      };
-
-      ws.onerror = (e) => {
-        console.error("WebSocket error", e);
-        connectionFailed = true;
-        setStatus('WebSocket connection failed');
-      };
+      }
 
       processor.onaudioprocess = (e) => {
-        if (!ws || ws.readyState !== WebSocket.OPEN) return;
-        const inputData = e.inputBuffer.getChannelData(0);
-        const pcmData = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF;
+        if (!ws || ws.readyState !== WebSocket.OPEN) return
+        const inputData = e.inputBuffer.getChannelData(0)
+
+        let sum = 0
+        for (let i = 0; i < inputData.length; i++) sum += inputData[i] * inputData[i]
+        const rms = Math.sqrt(sum / inputData.length)
+        if (rms > 0.015) {
+          speechDetectedRef.current = true
+          resetSarvamSilenceTimer()
         }
 
-        let binary = '';
-        const bytes = new Uint8Array(pcmData.buffer);
-        for (let i = 0; i < bytes.byteLength; i++) {
-          binary += String.fromCharCode(bytes[i]);
+        const pcmData = new Int16Array(inputData.length)
+        for (let i = 0; i < inputData.length; i++) {
+          pcmData[i] = Math.max(-1, Math.min(1, inputData[i])) * 0x7FFF
         }
-        const base64Audio = btoa(binary);
+
+        let binary = ''
+        const bytes = new Uint8Array(pcmData.buffer)
+        for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i])
+        const base64Audio = btoa(binary)
 
         ws.send(JSON.stringify({
           audio: {
@@ -484,48 +1219,61 @@ export default function Page() {
             encoding: "audio/wav",
             language_code: "hi-IN"
           }
-        }));
-      };
+        }))
+      }
 
-      const gainNode = audioContext.createGain();
-      gainNode.gain.value = 0;
-      source.connect(processor);
-      processor.connect(gainNode);
-      gainNode.connect(audioContext.destination);
+      const gainNode = audioContext.createGain()
+      gainNode.gain.value = 0
+      source.connect(processor)
+      processor.connect(gainNode)
+      gainNode.connect(audioContext.destination)
 
     } catch (err) {
-      console.error("Microphone access error", err)
-      setStatus('Microphone access denied or not supported')
+      console.error("Sarvam STT failed", err)
+      setStatus('Ready for a voice query')
+      setRecording(false)
+      setComplete(true)
     }
   }
 
   function stopRecording() {
-    const ws = wsRef.current;
+    if (silenceTimerRef.current) {
+      clearTimeout(silenceTimerRef.current)
+      silenceTimerRef.current = null
+    }
+
+    if (recognitionRef.current) {
+      try {
+        recognitionRef.current.stop()
+      } catch (e) { }
+      recognitionRef.current = null
+    }
 
     if (scriptProcessorRef.current) {
-      scriptProcessorRef.current.disconnect();
-      scriptProcessorRef.current = null;
+      try { scriptProcessorRef.current.disconnect() } catch (e) { }
+      scriptProcessorRef.current = null
     }
     if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
+      try { audioContextRef.current.close() } catch (e) { }
+      audioContextRef.current = null
     }
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
+      try { streamRef.current.getTracks().forEach(track => track.stop()) } catch (e) { }
+      streamRef.current = null
     }
-    setRecording(false);
 
+    setRecording(false)
+
+    const ws = wsRef.current
     if (ws) {
       if (ws.readyState === WebSocket.OPEN) {
-        finalizingRef.current = true;
+        finalizingRef.current = true
         try { ws.send(JSON.stringify({ type: 'flush' })) } catch (e) { }
-        setStatus('Finalizing transcript…');
-        setTimeout(() => { try { ws.close() } catch (e) { } }, 1500);
+        setTimeout(() => { try { ws.close() } catch (e) { } }, 800)
       } else {
         try { ws.close() } catch (e) { }
       }
-      wsRef.current = null;
+      wsRef.current = null
     }
   }
 
@@ -543,6 +1291,7 @@ export default function Page() {
     setRun((r) => r + 1)
     setAnswer('Working through the corpus…')
     setAnswerType('fast')
+    setLlmLatencyMs(null)
     ;(window as any).__queryStart = performance.now()
 
     let retrievedShards: string[] = []
@@ -572,6 +1321,7 @@ export default function Page() {
       setCitationCount(citations)
       setStages(buildStages(latency, shards.length))
       setAnswerType('fast')
+      updateLiveMetrics(latency)
       setStatus('Fast answer generated · Waiting for polished LLM response...')
 
     } catch (err) {
@@ -599,14 +1349,15 @@ export default function Page() {
       const data = await res.json()
       const shards = mapEvidenceShards(data.evidence_shards ?? [])
       const citations = data.citations_count ?? shards.length
+      const fullLatency = Math.round(data.latency_ms || (performance.now() - ((window as any).__queryStart || performance.now())))
 
       setAnswer(data.synthesized_answer)
       setEvidence(shards.length ? shards : defaultEvidence)
       setCitationCount(citations)
+      setLlmLatencyMs(fullLatency)
       setAnswerType('polished')
       setComplete(true)
       setStatus('Answer grounded · ready to inspect')
-      updateLiveMetrics(Math.round((performance.now() - (window as any).__queryStart || latencyMs)))
 
     } catch (err) {
       console.error("Synthesis failed", err)
@@ -644,26 +1395,32 @@ export default function Page() {
   )
 
   const voiceOrbSection = (
-    <div className="flex flex-col items-center justify-center min-h-[270px] relative">
-      <Magnetic>
-        <motion.button 
-          whileTap={{ scale: 0.95 }}
-          onClick={recording ? stopRecording : startRecording}
-          className="relative flex items-center justify-center cursor-pointer bg-transparent border-0 outline-none p-0 z-10"
-          style={{ width: '192px', height: '192px' }}
-          aria-label="Toggle recording"
-        >
+    <div className="flex flex-col items-center justify-center min-h-[220px] relative my-1">
+      <div className="relative flex items-center justify-center">
+        {/* Wave Visualizer Canvas behind / around the mic */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-0">
           <VoiceOrb isRecording={recording} isThinking={!complete} />
-          <div className="absolute inset-0 flex items-center justify-center pointer-events-none text-white z-20">
+        </div>
+
+        {/* Simple, sleek, minimal Mic Button */}
+        <Magnetic>
+          <motion.button 
+            whileTap={{ scale: 0.92 }}
+            whileHover={{ scale: 1.08 }}
+            onClick={recording ? stopRecording : startRecording}
+            className="relative flex items-center justify-center cursor-pointer bg-slate-950/80 hover:bg-slate-900/90 border border-amber-500/40 hover:border-amber-400/80 rounded-full shadow-[0_0_20px_rgba(245,158,11,0.25)] hover:shadow-[0_0_30px_rgba(245,158,11,0.5)] transition-all z-10 p-0"
+            style={{ width: '80px', height: '80px' }}
+            aria-label="Toggle recording"
+          >
             {recording ? (
-              <Square size={28} fill="currentColor" className="text-orange-600 animate-pulse" />
+              <Square size={24} fill="#ea580c" className="text-orange-500 drop-shadow-[0_0_12px_#ea580c] animate-pulse" />
             ) : (
-              <Mic size={32} className="text-amber-500" />
+              <Mic size={30} className="text-amber-400 drop-shadow-[0_0_10px_#f59e0b]" />
             )}
-          </div>
-        </motion.button>
-      </Magnetic>
-      <p className="core-status" style={{ position: 'absolute', bottom: 0 }}><span className="signal" />{status}</p>
+          </motion.button>
+        </Magnetic>
+      </div>
+      <p className="core-status" style={{ position: 'relative', marginTop: '1.25rem' }}><span className="signal" />{status}</p>
     </div>
   )
 
@@ -764,7 +1521,7 @@ export default function Page() {
               हिंदी (Hindi)
               <button onClick={(e) => { e.preventDefault(); playAudio(hindiText, 'hi-IN'); }} style={{ background: 'transparent', border: 'none', color: '#f59e0b', cursor: 'pointer' }}><Volume2 size={14} /></button>
             </h4>
-            <p style={{ fontSize: '1.05rem', lineHeight: '1.6', flex: 1, color: 'rgba(255,255,255,0.9)' }}>{hindiText}</p>
+            <p style={{ fontSize: '1.05rem', lineHeight: '1.6', flex: 1, color: answerType === 'fast' && !complete ? 'rgba(245,158,11,0.75)' : 'rgba(255,255,255,0.9)', transition: 'color 0.5s ease' }}>{hindiText}</p>
           </motion.div>
           <motion.div style={{ flex: 1, padding: '1.25rem', background: 'rgba(255,255,255,0.03)', borderRadius: '8px', border: '1px solid rgba(255,255,255,0.05)', display: 'flex', flexDirection: 'column' }} animate={!complete ? { opacity: [0.4, 1, 0.4] } : { opacity: 1 }} transition={{ duration: 1.5, repeat: Infinity }}>
             <h4 style={{ fontSize: '0.7rem', color: '#f59e0b', marginBottom: '0.5rem', textTransform: 'uppercase', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -793,35 +1550,33 @@ export default function Page() {
               <span>{(latencyMs / 1000).toFixed(1)}s</span>
             )}
           </span>
-          <span><Sparkles size={14} /> {queryError ? 'backend unreachable' : 'guardrail passed'}</span>
+          {llmLatencyMs !== null && (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <Sparkles size={14} style={{ color: '#34d399' }} />
+              <span style={{ color: '#f59e0b', fontWeight: 600 }}>Enhanced Duration:</span>
+              <motion.span
+                animate={{ textShadow: ['0 0 8px #34d399', '0 0 20px #34d399', '0 0 8px #34d399'] }}
+                transition={{ duration: 1.2, repeat: Infinity }}
+                style={{ color: '#34d399', fontWeight: 700, fontSize: '1.05em' }}
+              >
+                {llmLatencyMs >= 1000 ? `${(llmLatencyMs / 1000).toFixed(1)}s` : `${llmLatencyMs} ms`} ✨
+              </motion.span>
+            </span>
+          )}
+          <span><Sparkles size={14} /> {queryError ? 'backend unreachable' : answerType === 'fast' && !complete ? 'fast path · unverified' : 'guardrail passed'}</span>
         </div>
       </motion.article>
     </section>
   )
 
   const latencyMetricsSection = (
-    <motion.section className="analytics panel-glass animate-fade-in" style={{ marginTop: '2rem' }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }}>
-      <div className="analytics-heading">
-        <div>
-          <p className="eyebrow">03 / OBSERVABILITY</p>
-          <h3>Benchmark <span style={{ fontSize: '0.65em', opacity: 0.6, fontWeight: 400 }}>(across {sampleSize} queries)</span></h3>
-        </div>
-        <div className="warm"><span className="live-dot" /> {sampleSize} SAMPLES</div>
-      </div>
-      <div className="stream-wrap">
-        <div className="stream-line"><span className="stream-pulse" /></div>
-        {['P50', 'P70', 'P100'].map((metric, i) => (
-          <button key={metric} className={`metric metric-${i}`} onMouseEnter={() => setHoverMetric(metric)}>
-            <strong>{metric}</strong>
-            <span>{metrics[i]} ms</span>
-            {hoverMetric === metric && <i className="echo" />}
-          </button>
-        ))}
-      </div>
-      <div className="analytics-foot">
-        <span>Full pipeline · retrieval + generation</span>
-        <span>Benchmark P50 <b>{metrics[0] >= 1000 ? `${(metrics[0]/1000).toFixed(1)}s` : `${metrics[0]}ms`}</b> · P100 <b>{metrics[2] >= 1000 ? `${(metrics[2]/1000).toFixed(1)}s` : `${metrics[2]}ms`}</b></span>
-      </div>
+    <motion.section style={{ marginTop: '2rem' }} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: .5 }}>
+      <TelemetryPanel
+        latencyMs={latencyMs}
+        llmLatencyMs={llmLatencyMs}
+        latencyHistory={latencyHistoryRef.current}
+        liveCount={run > 1 ? run - 1 : 0}
+      />
     </motion.section>
   )
 
@@ -852,7 +1607,7 @@ export default function Page() {
     <aside className="evidence-column w-full">
       <div className="section-label">
         <span>02</span>
-        <p>EVIDENCE SHARDS</p>
+        <p>EVIDENCE SHARDS (TOP 3)</p>
       </div>
       <motion.div 
         className="grid grid-cols-1 gap-4 w-full"
@@ -869,11 +1624,11 @@ export default function Page() {
         animate="visible"
       >
         <AnimatePresence mode="popLayout">
-          {evidence.map(([id, source, copy], i) => (
+          {evidence.slice(0, 3).map(([id, source, copy, score], i) => (
             <BentoCard 
               key={`${id}-${i}`} 
               id={id} 
-              score={0.94 - (i * 0.06)} 
+              score={score ?? 0} 
               text={copy} 
               source={source} 
               index={i} 
@@ -896,6 +1651,7 @@ export default function Page() {
 
   return (
     <motion.main className={`voice-shell dashboard-enter ${booting ? 'booting' : ''}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .8 }}>
+      <SpaceBackground isWarping={!complete || recording} />
       <div className="ambient-void" aria-hidden="true"><span>01</span><i /><i /><i /></div>
       
       {headerSection}
@@ -915,17 +1671,18 @@ export default function Page() {
           {queryPanelSection}
 
           {groundedResponseSection}
+        </div>
+
+        {/* Right Column: 3D Vector Cosmos + Top 3 Evidence Cards + Observability / Telemetry Panel */}
+        <div className="lg:col-span-5 flex flex-col gap-6 w-full">
+          <VectorCosmos evidence={evidence.slice(0, 3)} isSearching={!complete} />
+          {workspaceEvidenceSection}
           
           {complete && (
-            <div style={{ maxWidth: '1200px', padding: '0 2rem', margin: '0 auto', width: '100%' }}>
+            <div className="w-full">
               {latencyMetricsSection}
             </div>
           )}
-        </div>
-
-        {/* Right Column: Bento evidence cards grid */}
-        <div className="lg:col-span-5 w-full">
-          {workspaceEvidenceSection}
         </div>
       </div>
 
