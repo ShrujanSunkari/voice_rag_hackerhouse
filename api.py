@@ -22,11 +22,20 @@ load_dotenv()
 # ==========================================
 QDRANT_URL = os.environ.get("QDRANT_URL")
 QDRANT_API_KEY = os.environ.get("QDRANT_API_KEY")
-GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+GROQ_API_KEYS = [key for key in (os.environ.get(f"GROQ_API_KEY{i}") for i in range(1, 6)) if key]
+if not GROQ_API_KEYS and os.environ.get("GROQ_API_KEY"):
+    GROQ_API_KEYS = [os.environ.get("GROQ_API_KEY")]
 SARVAM_API_KEY = os.environ.get("SARVAM_API_KEY")
 
 qdrant_client = QdrantClient(url=QDRANT_URL, api_key=QDRANT_API_KEY, prefer_grpc=True)
-groq_client = Groq(api_key=GROQ_API_KEY)
+groq_key_index = 0
+groq_client = Groq(api_key=GROQ_API_KEYS[groq_key_index])
+
+def rotate_groq_key():
+    global groq_key_index, groq_client
+    groq_key_index = (groq_key_index + 1) % len(GROQ_API_KEYS)
+    groq_client = Groq(api_key=GROQ_API_KEYS[groq_key_index])
+    print(f"Groq rate limit hit. Rotated to GROQ_API_KEY{groq_key_index + 1}")
 
 print("Loading local embedder for queries...")
 embedder = TextEmbedding(model_name="sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
@@ -156,6 +165,7 @@ def generate_with_fallback(
     """
     last_error = None
     active_models = get_active_groq_models()
+    key_rotations = 0
     
     for model_name in active_models:
         try:
@@ -182,6 +192,17 @@ def generate_with_fallback(
             if is_degraded:
                 logging.info(f"Using fallback model '{model_name}'.")
             return raw, model_name, is_degraded
+        except GroqRateLimitError as e:
+            if key_rotations < len(GROQ_API_KEYS) - 1:
+                key_rotations += 1
+                rotate_groq_key()
+                logging.warning(f"Rate limited on '{model_name}'. Retrying same model with GROQ_API_KEY{groq_key_index + 1}.")
+                active_models.append(model_name)
+                last_error = e
+                continue
+            logging.warning(f"Rate limited on '{model_name}' and all {len(GROQ_API_KEYS)} Groq API keys exhausted. Skipping to next model.")
+            last_error = e
+            continue
         except Exception as e:
             logging.warning(f"⚠️ Failed on '{model_name}'. Reason: {str(e)[:100]}... Skipping to next.")
             last_error = e

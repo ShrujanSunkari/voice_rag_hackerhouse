@@ -908,7 +908,7 @@ export default function Page() {
   const [llmLatencyMs, setLlmLatencyMs] = useState<number | null>(1600)
   const latencyHistoryRef = useRef<number[]>([])
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://127.0.0.1:8000'
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://voiceraghackerhouse-production.up.railway.app'
 
   useEffect(() => {
     fetch(`${API_BASE}/api/metrics`)
