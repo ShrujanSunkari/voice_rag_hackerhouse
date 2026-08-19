@@ -1053,83 +1053,10 @@ export default function Page() {
 
       setRecording(true)
       setComplete(false)
-      setStatus('Listening · speak your question...')
+      setStatus('Listening · speak Hindi freely · press Stop when done')
 
-      const SpeechRecognition = typeof window !== 'undefined'
-        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-        : null
-
-      if (SpeechRecognition) {
-        try {
-          const rec = new SpeechRecognition()
-          recognitionRef.current = rec
-          rec.continuous = false
-          rec.interimResults = true
-          rec.lang = 'en-IN'
-
-          let finalTrans = ''
-
-          rec.onresult = (event: any) => {
-            let current = ''
-            for (let i = 0; i < event.results.length; i++) {
-              current += event.results[i][0].transcript
-            }
-            if (current.trim()) {
-              finalTrans = current
-              transcriptBufferRef.current = current
-              setText(current)
-              speechDetectedRef.current = true
-
-              // Reset silence auto-submit timer (1.2s after last detected word)
-              if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-              silenceTimerRef.current = setTimeout(() => {
-                console.log("Silence threshold reached after speech. Auto-submitting...");
-                stopRecording()
-              }, 1200)
-            }
-          }
-
-          rec.onspeechend = () => {
-            console.log("Speech ended detected by browser engine.")
-            setTimeout(() => {
-              stopRecording()
-            }, 400)
-          }
-
-          rec.onend = () => {
-            setRecording(false)
-            if (silenceTimerRef.current) {
-              clearTimeout(silenceTimerRef.current)
-              silenceTimerRef.current = null
-            }
-            const queryToRun = transcriptBufferRef.current.trim() || finalTrans.trim()
-            if (queryToRun) {
-              setStatus('Query received · synthesizing...')
-              runQuery(queryToRun)
-            } else {
-              setStatus('Ready for a voice query')
-              setComplete(true)
-            }
-          }
-
-          rec.onerror = (err: any) => {
-            console.warn("SpeechRecognition error, falling back to Sarvam STT", err)
-            if (!speechDetectedRef.current) {
-              startSarvamRecording()
-            } else {
-              stopRecording()
-            }
-          }
-
-          rec.start()
-          return
-        } catch (e) {
-          console.warn("SpeechRecognition start failed, trying Sarvam WebSocket", e)
-          startSarvamRecording()
-        }
-      } else {
-        startSarvamRecording()
-      }
+      // Always use Sarvam hi-IN STT — skip browser SpeechRecognition which defaults to English
+      startSarvamRecording()
     } catch (err) {
       console.error("Microphone start error", err)
       setStatus('Microphone access denied or not supported')

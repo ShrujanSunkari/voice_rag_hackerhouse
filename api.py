@@ -1,10 +1,23 @@
 import os
+import sys
 import time
 import itertools
 import functools
 import requests
 import json
 import re
+
+# Force UTF-8 stdout so Hindi text in print() doesn't crash on Windows cp1252 terminals
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+
+def safe_print(*args, **kwargs):
+    """Print that never crashes on non-UTF-8 terminals."""
+    try:
+        print(*args, **kwargs)
+    except UnicodeEncodeError:
+        text = ' '.join(str(a) for a in args)
+        print(text.encode('ascii', errors='replace').decode('ascii'), **{k: v for k, v in kwargs.items() if k != 'flush'}, flush=True)
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -69,6 +82,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["Server-Timing"],  # Allow browser DevTools to see Server-Timing header
 )
 
 request_latencies = []
@@ -77,7 +91,7 @@ request_counter = itertools.count(1)
 
 def tlog(req_id: int, stage: str, ms: float, extra: str = ""):
     """Single-line lightweight timing log, greppable via '[TIMING]'."""
-    print(f"[TIMING] req={req_id} {stage}={ms:.1f}ms {extra}", flush=True)
+    safe_print(f"[TIMING] req={req_id} {stage}={ms:.1f}ms {extra}", flush=True)
 
 
 def next_req_id() -> int:
@@ -405,7 +419,7 @@ def retrieve_context(search_query: str, req_id: int = 0):
 def process_retrieve(request: QueryRequest):
     req_id = next_req_id()
     t_start = time.perf_counter()
-    print(
+    safe_print(
         f"[TIMING] req={req_id} start path=/api/retrieve q='{request.transcript[:60]}'",
         flush=True,
     )
@@ -453,7 +467,7 @@ def process_synthesize(request: SynthesisRequest):
     req_id = next_req_id()
     start_time = time.perf_counter()
     translate_ms = 0.0
-    print(
+    safe_print(
         f"[TIMING] req={req_id} start path=/api/synthesize q='{request.transcript[:60]}'",
         flush=True,
     )
@@ -470,9 +484,9 @@ def process_synthesize(request: SynthesisRequest):
             tlog(req_id, "translate_stage", translate_ms)
             if translated:
                 search_query = translated
-                print(f"Translated query: '{request.transcript}' -> '{search_query}'")
+                safe_print(f"Translated query: '{request.transcript}' -> '{search_query}'")
         except Exception as e:
-            print(f"Translation failed: {e}")
+            safe_print(f"Translation failed: {e}")
 
     MAX_QUERY_CHARS = 512
     if len(search_query) > MAX_QUERY_CHARS:
