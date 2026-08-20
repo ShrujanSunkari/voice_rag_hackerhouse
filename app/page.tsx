@@ -1079,26 +1079,16 @@ export default function Page() {
       scriptProcessorRef.current = processor
 
       const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "sk_27896hlg_nOnuU6mFkY8nr2jbJc9gJFLA"
-      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=unknown&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`
+      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`
       const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`])
       wsRef.current = ws
 
       let currentTranscript = ''
 
-      const resetSarvamSilenceTimer = () => {
-        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current)
-        if (speechDetectedRef.current) {
-          silenceTimerRef.current = setTimeout(() => {
-            console.log("Sarvam silence threshold reached. Auto-endpointing...")
-            stopRecording()
-          }, 1400)
-        }
-      }
-
       ws.onopen = () => {
         setRecording(true)
         setComplete(false)
-        setStatus('Recording · speak naturally')
+        setStatus('Recording · speak in Hindi · click Stop when finished')
       }
 
       ws.onmessage = (event) => {
@@ -1110,7 +1100,6 @@ export default function Page() {
             transcriptBufferRef.current = receivedText
             setText(receivedText)
             speechDetectedRef.current = true
-            resetSarvamSilenceTimer()
           }
         } catch (e) { }
       }
@@ -1140,7 +1129,6 @@ export default function Page() {
         const rms = Math.sqrt(sum / inputData.length)
         if (rms > 0.015) {
           speechDetectedRef.current = true
-          resetSarvamSilenceTimer()
         }
 
         const pcmData = new Int16Array(inputData.length)
