@@ -906,9 +906,12 @@ export default function Page() {
   const [sampleSize, setSampleSize] = useState(100)
   const [answerType, setAnswerType] = useState<'fast' | 'polished'>('polished')
   const [llmLatencyMs, setLlmLatencyMs] = useState<number | null>(1600)
+  const [isSynthesizing, setIsSynthesizing] = useState(false)
   const latencyHistoryRef = useRef<number[]>([])
 
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://104.211.75.92:8000'
+  // Use the Next.js server-side proxy path to avoid Mixed Content errors on Vercel.
+  // All /api/backend/* requests are rewritten to http://104.211.75.92:8000/* in next.config.mjs.
+  const API_BASE = '/api/backend'
 
   useEffect(() => {
     fetch(`${API_BASE}/api/metrics`)
@@ -1263,6 +1266,7 @@ export default function Page() {
     }
 
     // Phase 2: Synthesize
+    setIsSynthesizing(true)
     try {
       const res = await fetch(`${API_BASE}/api/synthesize`, {
         method: 'POST',
@@ -1293,6 +1297,8 @@ export default function Page() {
       // Keep the fast answer, just set complete
       setComplete(true)
       setStatus('Answer grounded · ready to inspect (Synthesis failed)')
+    } finally {
+      setIsSynthesizing(false)
     }
   }
   const headerSection = (
@@ -1460,6 +1466,23 @@ export default function Page() {
             <p style={{ fontSize: '0.95rem', lineHeight: '1.6', flex: 1, color: 'rgba(255,255,255,0.7)' }}>{englishText || (complete ? (hindiText ? '(Translation not available)' : '') : 'Translating...')}</p>
           </motion.div>
         </div>
+
+        {/* Synthesizing animation — visible while /api/synthesize is in flight */}
+        {isSynthesizing && (
+          <div className="flex items-center space-x-2 mt-4 px-4 py-3 bg-gray-900/50 rounded-lg border border-gray-800">
+            {/* Bouncing audio equalizer bars */}
+            <div className="flex items-center space-x-1">
+              <div className="w-1 h-3 bg-yellow-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+              <div className="w-1 h-5 bg-yellow-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+              <div className="w-1 h-3 bg-yellow-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+            </div>
+            {/* Pulsing label */}
+            <span className="text-sm font-medium text-yellow-500 animate-pulse">
+              Synthesizing natural voice...
+            </span>
+          </div>
+        )}
+
         <div className="citation-row">
           <span><FileText size={14} /> {citationCount} citations</span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
