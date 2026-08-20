@@ -8,17 +8,24 @@ import json
 import re
 
 # Force UTF-8 stdout so Hindi text in print() doesn't crash on Windows cp1252 terminals
-if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
-    sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 
 def safe_print(*args, **kwargs):
     """Print that never crashes on non-UTF-8 terminals."""
     try:
         print(*args, **kwargs)
     except UnicodeEncodeError:
-        text = ' '.join(str(a) for a in args)
-        print(text.encode('ascii', errors='replace').decode('ascii'), **{k: v for k, v in kwargs.items() if k != 'flush'}, flush=True)
-from fastapi import FastAPI, HTTPException, File, UploadFile
+        text = " ".join(str(a) for a in args)
+        print(
+            text.encode("ascii", errors="replace").decode("ascii"),
+            **{k: v for k, v in kwargs.items() if k != "flush"},
+            flush=True,
+        )
+
+
+from fastapi import FastAPI, HTTPException, File, UploadFile, Response
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field, AliasChoices, ConfigDict
@@ -67,6 +74,7 @@ print("Warming up embedder...")
 _ = list(embedder.embed(["warmup query"]))
 print("API Setup Complete.")
 
+
 @functools.lru_cache(maxsize=1024)
 def get_cached_embedding(text_str: str) -> tuple[float, ...]:
     """LRU cached embedding generation so repeat/similar queries take 0ms."""
@@ -82,7 +90,9 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["Server-Timing"],  # Allow browser DevTools to see Server-Timing header
+    expose_headers=[
+        "Server-Timing"
+    ],  # Allow browser DevTools to see Server-Timing header
 )
 
 request_latencies = []
@@ -96,6 +106,13 @@ def tlog(req_id: int, stage: str, ms: float, extra: str = ""):
 
 def next_req_id() -> int:
     return next(request_counter)
+
+
+def set_server_timing(response: Response, stages: list[tuple[str, float, str]]):
+    """Attach W3C Server-Timing header so Chrome DevTools renders per-stage bars."""
+    response.headers["Server-Timing"] = ", ".join(
+        f'{name};dur={dur:.1f};desc="{desc}"' for name, dur, desc in stages
+    )
 
 
 # ==========================================
@@ -416,7 +433,7 @@ def retrieve_context(search_query: str, req_id: int = 0):
 
 
 @app.post("/api/retrieve")
-def process_retrieve(request: QueryRequest):
+def process_retrieve(request: QueryRequest, response: Response):
     req_id = next_req_id()
     t_start = time.perf_counter()
     safe_print(
@@ -451,6 +468,14 @@ def process_retrieve(request: QueryRequest):
         total_ms,
         extra=f"path=/api/retrieve shards={len(evidence_shards_fast)} overhead={overhead_ms:.1f}ms",
     )
+    set_server_timing(
+        response,
+        [
+            ("embed", latency_dict["embedding_ms"], "MiniLM Embedding"),
+            ("qdrant", latency_dict["qdrant_network_ms"], "Qdrant HNSW Lookup"),
+            ("retrieval", latency_dict["total_ms"], "Vector Search & Embed"),
+        ],
+    )
     return {
         "type": "fast_answer",
         "synthesized_answer": fast_answer,
@@ -463,7 +488,7 @@ def process_retrieve(request: QueryRequest):
 
 
 @app.post("/api/synthesize")
-def process_synthesize(request: SynthesisRequest):
+def process_synthesize(request: SynthesisRequest, response: Response):
     req_id = next_req_id()
     start_time = time.perf_counter()
     translate_ms = 0.0
@@ -476,7 +501,11 @@ def process_synthesize(request: SynthesisRequest):
     # Only translate long, purely English queries (>35 chars, no Devanagari).
     # Short English queries (e.g. "BPM") are understood natively by the multilingual
     # embedder, so translation adds ~2.5s with no retrieval benefit.
-    if len(search_query) > 35 and re.search(r"[a-zA-Z]", search_query) and not re.search(r"[\u0900-\u097F]", search_query):
+    if (
+        len(search_query) > 35
+        and re.search(r"[a-zA-Z]", search_query)
+        and not re.search(r"[\u0900-\u097F]", search_query)
+    ):
         try:
             t_tr = time.perf_counter()
             translated = groq_translate_to_hindi(search_query, req_id)
@@ -484,7 +513,9 @@ def process_synthesize(request: SynthesisRequest):
             tlog(req_id, "translate_stage", translate_ms)
             if translated:
                 search_query = translated
-                safe_print(f"Translated query: '{request.transcript}' -> '{search_query}'")
+                safe_print(
+                    f"Translated query: '{request.transcript}' -> '{search_query}'"
+                )
         except Exception as e:
             safe_print(f"Translation failed: {e}")
 
@@ -509,11 +540,23 @@ def process_synthesize(request: SynthesisRequest):
         search_result, ret_latency = retrieve_context(search_query, req_id)
         if not search_result or search_result[0].score < 0.45:
             polished_answer = "HINDI: क्षमा करें, मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली।\nENGLISH: UNANSWERABLE: Sorry, I couldn't find enough information on this topic."
+            guardrail_latency = round((time.perf_counter() - start_time) * 1000, 2)
+            set_server_timing(
+                response,
+                [
+                    ("translate", translate_ms, "Groq Translate"),
+                    ("embed", ret_latency["embedding_ms"], "MiniLM Embedding"),
+                    ("qdrant", ret_latency["qdrant_network_ms"], "Qdrant HNSW Lookup"),
+                    ("total", guardrail_latency, "Guardrail Refusal"),
+                ],
+            )
             return {
                 "type": "polished_answer",
                 "synthesized_answer": polished_answer,
                 "evidence_shards": request.evidence_shards,
-                "full_pipeline_latency_ms": round((time.perf_counter() - start_time) * 1000, 2),
+                "full_pipeline_latency_ms": round(
+                    (time.perf_counter() - start_time) * 1000, 2
+                ),
                 "transcript": request.transcript,
                 "model_used": "none",
                 "is_degraded": False,
@@ -555,6 +598,16 @@ def process_synthesize(request: SynthesisRequest):
             f"llm={llm_ms:.0f}ms overhead={overhead_ms:.1f}ms"
         ),
     )
+    set_server_timing(
+        response,
+        [
+            ("translate", translate_ms, "Groq Translate"),
+            ("embed", ret_latency["embedding_ms"], "MiniLM Embedding"),
+            ("qdrant", ret_latency["qdrant_network_ms"], "Qdrant HNSW Lookup"),
+            ("llm", llm_ms, "Groq Synthesis"),
+            ("total", polished_latency, "Full Pipeline"),
+        ],
+    )
 
     return {
         "type": "polished_answer",
@@ -568,7 +621,7 @@ def process_synthesize(request: SynthesisRequest):
 
 
 @app.post("/api/voice")
-async def process_raw_audio(file: UploadFile = File(...)):
+async def process_raw_audio(file: UploadFile = File(...), response: Response = None):  # type: ignore[assignment]
     req_id = next_req_id()
     total_start_time = time.perf_counter()
     audio_content = await file.read()
@@ -576,6 +629,9 @@ async def process_raw_audio(file: UploadFile = File(...)):
         f"[TIMING] req={req_id} start path=/api/voice file={file.filename} bytes={len(audio_content)}",
         flush=True,
     )
+    voice_translate_ms = 0.0
+    voice_llm_ms = 0.0
+    voice_ret = {"embedding_ms": 0.0, "qdrant_network_ms": 0.0, "total_ms": 0.0}
 
     sarvam_url = "https://api.sarvam.ai/speech-to-text"
     headers = {"api-subscription-key": SARVAM_API_KEY}
@@ -585,14 +641,14 @@ async def process_raw_audio(file: UploadFile = File(...)):
 
     try:
         print("Sending audio to Sarvam AI...")
-        # Sarvam STT requires language_code
-        data["language_code"] = "hi-IN"
+        # Sarvam STT: "unknown" = auto-detect spoken language (Hindi or English)
+        data["language_code"] = "unknown"
         t_stt = time.perf_counter()
-        response = requests.post(sarvam_url, headers=headers, files=files, data=data)
+        sarvam_resp = requests.post(sarvam_url, headers=headers, files=files, data=data)
         stt_ms = (time.perf_counter() - t_stt) * 1000
         tlog(req_id, "sarvam_stt", stt_ms)
-        response.raise_for_status()
-        sarvam_data = response.json()
+        sarvam_resp.raise_for_status()
+        sarvam_data = sarvam_resp.json()
         transcript = sarvam_data.get("transcript", "").strip()
         print(f"Sarvam Transcript: {transcript}")
     except requests.exceptions.HTTPError as e:
@@ -627,17 +683,28 @@ async def process_raw_audio(file: UploadFile = File(...)):
         print("Translating query to Hindi...")
         t_tr = time.perf_counter()
         hindi_query = groq_translate_to_hindi(transcript, req_id)
-        tlog(req_id, "translate_stage", (time.perf_counter() - t_tr) * 1000)
+        voice_translate_ms = (time.perf_counter() - t_tr) * 1000
+        tlog(req_id, "translate_stage", voice_translate_ms)
         print(f"Translated query: {hindi_query}")
     except Exception as e:
         print(f"Translation Error: {e}")
         hindi_query = transcript
 
-    search_result, _ = retrieve_context(hindi_query, req_id)
+    search_result, voice_ret = retrieve_context(hindi_query, req_id)
 
     if not search_result or search_result[0].score < 0.45:
         latency = round((time.time() - total_start_time) * 1000, 2)
         request_latencies.append(latency)
+        set_server_timing(
+            response,
+            [
+                ("sarvam_stt", stt_ms, "Sarvam STT"),
+                ("translate", voice_translate_ms, "Groq Translate"),
+                ("embed", voice_ret["embedding_ms"], "MiniLM Embedding"),
+                ("qdrant", voice_ret["qdrant_network_ms"], "Qdrant HNSW Lookup"),
+                ("total", latency, "Guardrail Refusal"),
+            ],
+        )
         return {
             "transcript": transcript,
             "synthesized_answer": "मुझे इस विषय पर पर्याप्त जानकारी नहीं मिली। कृपया कोई दूसरा सवाल पूछें।",
@@ -653,7 +720,8 @@ async def process_raw_audio(file: UploadFile = File(...)):
         print("Generating answer...")
         t_llm = time.perf_counter()
         rag_res, _, _ = groq_generate_answer(context_text, hindi_query, req_id)
-        tlog(req_id, "llm_stage", (time.perf_counter() - t_llm) * 1000)
+        voice_llm_ms = (time.perf_counter() - t_llm) * 1000
+        tlog(req_id, "llm_stage", voice_llm_ms)
         ans = rag_res.synthesized_answer
         status = rag_res.status
     except Exception as e:
@@ -664,6 +732,17 @@ async def process_raw_audio(file: UploadFile = File(...)):
     latency = round((time.perf_counter() - total_start_time) * 1000, 2)
     request_latencies.append(latency)
     tlog(req_id, "endpoint_total", latency, extra="path=/api/voice")
+    set_server_timing(
+        response,
+        [
+            ("sarvam_stt", stt_ms, "Sarvam STT"),
+            ("translate", voice_translate_ms, "Groq Translate"),
+            ("embed", voice_ret["embedding_ms"], "MiniLM Embedding"),
+            ("qdrant", voice_ret["qdrant_network_ms"], "Qdrant HNSW Lookup"),
+            ("llm", voice_llm_ms, "Groq Synthesis"),
+            ("total", latency, "Full Voice Pipeline"),
+        ],
+    )
 
     return {
         "transcript": transcript,

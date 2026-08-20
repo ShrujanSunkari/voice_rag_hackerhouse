@@ -1053,7 +1053,7 @@ export default function Page() {
 
       setRecording(true)
       setComplete(false)
-      setStatus('Listening · speak Hindi freely · press Stop when done')
+      setStatus('Listening · Hindi या English — auto-detected')
 
       // Always use Sarvam hi-IN STT — skip browser SpeechRecognition which defaults to English
       startSarvamRecording()
@@ -1079,7 +1079,7 @@ export default function Page() {
       scriptProcessorRef.current = processor
 
       const apiKey = process.env.NEXT_PUBLIC_SARVAM_API_KEY || "sk_27896hlg_nOnuU6mFkY8nr2jbJc9gJFLA"
-      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=hi-IN&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`
+      const wsUrl = `wss://api.sarvam.ai/speech-to-text/ws?language-code=unknown&model=saaras:v3&mode=transcribe&sample_rate=16000&high_vad_sensitivity=false&vad_signals=true&flush_signal=true`
       const ws = new WebSocket(wsUrl, [`api-subscription-key.${apiKey}`])
       wsRef.current = ws
 
@@ -1372,7 +1372,7 @@ export default function Page() {
           <p className="eyebrow">VOICE TRANSCRIPT / LIVE</p>
           <h3>Shape your question</h3>
         </div>
-        <span className="lang-pill">EN-IN <ChevronDown size={12} /></span>
+        <span className="lang-pill">{/[\u0900-\u097F]/.test(text) ? 'HI-IN · AUTO' : 'EN-IN · AUTO'} <ChevronDown size={12} /></span>
       </div>
       <textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Editable transcript" />
       <div className="query-actions">
