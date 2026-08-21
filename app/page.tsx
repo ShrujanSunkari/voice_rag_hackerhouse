@@ -901,6 +901,9 @@ export default function Page() {
   const streamRef = useRef<MediaStream | null>(null)
   const answerRef = useRef<HTMLElement>(null)
   const lastSpokenRunRef = useRef<number>(0)
+  // Autoplay-unlock: a persistent Audio element initialised once so the browser
+  // grants playback permission the moment the user taps a button (same gesture tick).
+  const audioRef = useRef<HTMLAudioElement | null>(typeof Audio !== 'undefined' ? new Audio() : null)
   const [initialized, setInitialized] = useState(false), [booting, setBooting] = useState(false), [text, setText] = useState('व्यवसाय प्रक्रिया प्रबंधन क्या है'), [recording, setRecording] = useState(false), [complete, setComplete] = useState(true), [expanded, setExpanded] = useState(false), [hoverMetric, setHoverMetric] = useState('P70'), [status, setStatus] = useState('Ready for a voice query'), [run, setRun] = useState(1), [tts, setTts] = useState(true), [corePoint, setCorePoint] = useState({ x: 0, y: 0 }), [answer, setAnswer] = useState('HINDI: व्यवसाय प्रक्रिया प्रबंधन (बी.पी.एम.) एक प्रबंधन दृष्टिकोण है जो कंपनी की व्यवसाय प्रक्रियाओं का प्रबंधन और अनुकूलन करके कॉर्पोरेट प्रदर्शन और ग्राहक संतुष्टि को बढ़ाने पर केंद्रित होता है।\nENGLISH: Business Process Management (BPM) is a management approach that focuses on managing and optimizing an organization\'s business processes to improve corporate performance and maximize customer satisfaction.'), [evidence, setEvidence] = useState(defaultEvidence), [stages, setStages] = useState(defaultStages), [latencyMs, setLatencyMs] = useState(146), [metrics, setMetrics] = useState(defaultMetrics), [citationCount, setCitationCount] = useState(10), [queryError, setQueryError] = useState<string | null>(null)
   const [showTelemetry, setShowTelemetry] = useState(false)
   const [sampleSize, setSampleSize] = useState(100)
@@ -1215,6 +1218,13 @@ export default function Page() {
     if (!query) {
       setStatus('Enter a question before running the query')
       return
+    }
+
+    // THE UNLOCK: play silence in the same user-gesture tick so the browser
+    // allows real audio to autoplay later (after the async fetch completes).
+    if (audioRef.current) {
+      audioRef.current.src = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA'
+      audioRef.current.play().catch(e => console.log('Audio unlock skipped:', e))
     }
 
     setComplete(false)
