@@ -23,6 +23,50 @@ const defaultStages: Stage[] = [
 ]
 const defaultMetrics = [146, 149, 180]
 
+// ── CURSOR GLOW TRAIL ──────────────────────────────────────────────────────
+function CursorGlow() {
+  const glowRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    const el = glowRef.current
+    if (!el) return
+    let rafId: number
+    let currentX = 0, currentY = 0, targetX = 0, targetY = 0
+    const onMove = (e: MouseEvent) => { targetX = e.clientX; targetY = e.clientY }
+    window.addEventListener('mousemove', onMove, { passive: true })
+    const animate = () => {
+      currentX += (targetX - currentX) * 0.12
+      currentY += (targetY - currentY) * 0.12
+      if (el) { el.style.left = `${currentX}px`; el.style.top = `${currentY}px` }
+      rafId = requestAnimationFrame(animate)
+    }
+    animate()
+    return () => { window.removeEventListener('mousemove', onMove); cancelAnimationFrame(rafId) }
+  }, [])
+  return <div ref={glowRef} className="cursor-glow" aria-hidden="true" />
+}
+
+// ── AURORA BACKGROUND ──────────────────────────────────────────────────────
+function AuroraBackground() {
+  return (
+    <div className="aurora-layer" aria-hidden="true">
+      <div className="aurora-orb aurora-orb-1" />
+      <div className="aurora-orb aurora-orb-2" />
+      <div className="aurora-orb aurora-orb-3" />
+      <div className="aurora-orb aurora-orb-4" />
+    </div>
+  )
+}
+
+// ── DATA TICKER ──────────────────────────────────────────────────────────────
+const TICKER_DATA = 'ECHO·SIGHT ◈ QDRANT·HNSW ◈ SARVAM·STT ◈ GROQ·LLM ◈ SUB·200MS ◈ 778,650·VECTORS ◈ 384·DIM·MINIML ◈ HI-IN·AUTO ◈ EVIDENCE·BACKED ◈ GUARDRAIL·ACTIVE ◈ '
+function DataTicker() {
+  return (
+    <div className="data-ticker-wrap" aria-hidden="true">
+      <span className="data-ticker">{TICKER_DATA.repeat(3)}</span>
+    </div>
+  )
+}
+
 // ── 3D COSMIC DEEP SPACE WARP BACKGROUND ────────────────────────────────────
 function SpaceBackground({ isWarping = false }: { isWarping?: boolean }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -308,76 +352,239 @@ function BentoCard({ id, score, text, source, index }: { id: string; score: numb
   const ref = useRef<HTMLDivElement>(null)
   const [coords, setCoords] = useState({ x: 0, y: 0 })
   const [isHovered, setIsHovered] = useState(false)
+  const [tilt, setTilt] = useState({ x: 0, y: 0 })
 
   const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
     if (!ref.current) return
     const rect = ref.current.getBoundingClientRect()
-    setCoords({ x: e.clientX - rect.left, y: e.clientY - rect.top })
+    const mx = e.clientX - rect.left
+    const my = e.clientY - rect.top
+    setCoords({ x: mx, y: my })
+    setTilt({ x: -((my / rect.height) - 0.5) * 10, y: ((mx / rect.width) - 0.5) * 10 })
   }
+  const handleMouseLeave = () => { setIsHovered(false); setTilt({ x: 0, y: 0 }) }
 
   return (
-    <motion.div 
+    <motion.div
       ref={ref}
-      className="relative overflow-hidden rounded-xl border border-slate-800 bg-slate-950/40 p-5 transition-all duration-300 hover:border-amber-500/30 w-full"
+      className="relative overflow-hidden w-full"
       onMouseMove={handleMouseMove}
       onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      style={{ 
+      onMouseLeave={handleMouseLeave}
+      animate={{ rotateX: tilt.x, rotateY: tilt.y, scale: isHovered ? 1.015 : 1 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+      style={{
         minHeight: '160px',
         transformStyle: 'preserve-3d',
-        perspective: 1000
+        perspective: '1000px',
+        borderRadius: '8px',
+        border: isHovered ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(255,255,255,0.07)',
+        borderTopColor: isHovered ? 'rgba(245,158,11,0.4)' : 'rgba(255,255,255,0.12)',
+        background: 'rgba(6, 9, 16, 0.75)',
+        backdropFilter: 'blur(20px)',
+        boxShadow: isHovered
+          ? '0 0 0 1px rgba(245,158,11,0.1), 0 20px 60px rgba(0,0,0,0.7), -4px 0 0 rgba(245,158,11,0.5)'
+          : '0 0 0 1px rgba(0,0,0,0.5), 0 8px 32px rgba(0,0,0,0.5)',
+        padding: '20px',
       } as any}
       variants={{
-        hidden: { opacity: 0, y: 40, rotateX: -10 },
-        visible: { 
-          opacity: 1, 
-          y: 0, 
-          rotateX: 0,
-          transition: { type: "spring", stiffness: 100, damping: 12 }
-        },
+        hidden: { opacity: 0, y: 40 },
+        visible: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 100, damping: 12 } },
         exit: { opacity: 0, y: -20, transition: { duration: 0.2 } }
       }}
     >
-      {/* Underlying Border Spotlight Effect */}
+      {/* Glass inner highlight */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'linear-gradient(135deg,rgba(255,255,255,0.04) 0%,transparent 50%,rgba(0,0,0,0.1) 100%)', borderRadius: 'inherit' }} />
+      {/* Spotlight on hover */}
       {isHovered && (
-        <div 
-          className="absolute inset-[-1px] rounded-xl z-0 pointer-events-none opacity-100 transition-opacity duration-300"
-          style={{
-            background: `radial-gradient(120px circle at ${coords.x}px ${coords.y}px, rgba(245, 158, 11, 0.25), transparent 80%)`
-          }}
-        />
+        <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(200px circle at ${coords.x}px ${coords.y}px, rgba(245,158,11,0.1), transparent 70%)`, borderRadius: 'inherit', zIndex: 0 }} />
       )}
+      {/* Top amber line on hover */}
+      <div className="absolute top-0 left-0 right-0 h-px pointer-events-none" style={{ background: 'linear-gradient(90deg,transparent,rgba(245,158,11,0.35),transparent)', opacity: isHovered ? 1 : 0, transition: 'opacity 0.3s' }} />
 
-      {/* Inner card container to crop and layer */}
-      <div className="absolute inset-[1px] bg-slate-950/90 rounded-[11px] z-1 pointer-events-none" />
-      
-      {/* Background Spotlight Glow */}
-      {isHovered && (
-        <div 
-          className="pointer-events-none absolute inset-0 z-2 transition-opacity duration-300"
-          style={{
-            background: `radial-gradient(180px circle at ${coords.x}px ${coords.y}px, rgba(245, 158, 11, 0.08), transparent 80%)`
-          }}
-        />
-      )}
-      
       <div className="relative z-10 flex flex-col h-full justify-between">
         <div>
           <div className="flex justify-between items-center mb-3">
-            <span className="text-xs font-mono text-amber-500/85 font-semibold">{id}</span>
-            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              Score: {Number(score).toFixed(2)}
-            </span>
+            <span style={{ fontSize: '11px', fontFamily: "'IBM Plex Mono',monospace", color: '#f59e0b', fontWeight: 600, letterSpacing: '0.08em' }}>{id}</span>
+            <ScoreRing score={score} />
           </div>
-          <p className="text-sm text-slate-300 leading-relaxed font-sans line-clamp-4">{text}</p>
+          <p style={{ fontSize: '13px', lineHeight: '1.6', color: 'rgba(220,232,238,0.9)', fontFamily: "'Inter',sans-serif", display: '-webkit-box', WebkitLineClamp: 4, WebkitBoxOrient: 'vertical', overflow: 'hidden' } as any}>{text}</p>
         </div>
-        
-        <div className="text-[10px] text-slate-500 mt-4 flex gap-2 font-mono">
-          <span className="px-2 py-0.5 rounded bg-slate-800/40 border border-slate-800">{source}</span>
-          <span className="px-2 py-0.5 rounded bg-slate-800/40 border border-slate-800">semantic</span>
+        {/* Glowing score bar */}
+        <div style={{ marginTop: '12px', marginBottom: '4px' }}>
+          <div style={{ height: '2px', background: 'rgba(255,255,255,0.06)', borderRadius: '2px', overflow: 'hidden' }}>
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${score * 100}%` }}
+              transition={{ duration: 1, delay: 0.2, ease: 'easeOut' }}
+              style={{ height: '100%', background: score >= 0.9 ? 'linear-gradient(90deg,#34d399,#6ee7b7)' : score >= 0.8 ? 'linear-gradient(90deg,#f59e0b,#fbbf24)' : 'linear-gradient(90deg,#f97316,#fb923c)', boxShadow: score >= 0.9 ? '0 0 8px rgba(52,211,153,0.6)' : '0 0 8px rgba(245,158,11,0.6)', borderRadius: '2px' }}
+            />
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', marginTop: '10px', fontFamily: "'IBM Plex Mono',monospace", fontSize: '10px' }}>
+          <span style={{ padding: '3px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#7fa0ac', borderRadius: '3px' }}>{source}</span>
+          <span style={{ padding: '3px 8px', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: '#7fa0ac', borderRadius: '3px' }}>semantic</span>
         </div>
       </div>
     </motion.div>
+  )
+}
+
+// ── SCORE RING SVG ──────────────────────────────────────────────────────────────
+function ScoreRing({ score }: { score: number }) {
+  const r = 13, circ = 2 * Math.PI * r, filled = circ * Math.min(1, score)
+  const color = score >= 0.9 ? '#34d399' : score >= 0.8 ? '#f59e0b' : '#f97316'
+  return (
+    <div style={{ position: 'relative', width: 36, height: 36, flexShrink: 0 }}>
+      <svg width="36" height="36" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="18" cy="18" r={r} fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="2.5" />
+        <motion.circle cx="18" cy="18" r={r} fill="none" stroke={color} strokeWidth="2.5"
+          strokeDasharray={`${circ}`}
+          initial={{ strokeDashoffset: circ }}
+          animate={{ strokeDashoffset: circ - filled }}
+          transition={{ duration: 1.1, delay: 0.3, ease: 'easeOut' }}
+          strokeLinecap="round" style={{ filter: `drop-shadow(0 0 4px ${color})` }}
+        />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontSize: '8px', fontFamily: "'IBM Plex Mono',monospace", color, fontWeight: 700 }}>{(score * 100).toFixed(0)}</span>
+      </div>
+    </div>
+  )
+}
+
+// ── AUDIO EQ BARS ──────────────────────────────────────────────────────────────
+function AudioEQBars({ isRecording, isThinking }: { isRecording: boolean; isThinking: boolean }) {
+  const NUM = 32, isActive = isRecording || isThinking
+  return (
+    <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '36px', padding: '0 4px' }}>
+      {Array.from({ length: NUM }, (_, i) => {
+        const midDist = Math.abs(i - NUM / 2) / (NUM / 2)
+        const baseH = Math.max(3, 18 - midDist * 12)
+        return (
+          <motion.div key={i}
+            style={{ width: '3px', borderRadius: '2px 2px 0 0',
+              background: isRecording ? 'linear-gradient(to top,#ea580c,#f59e0b)' : isThinking ? 'linear-gradient(to top,#6366f1,#a78bfa)' : 'rgba(245,158,11,0.18)',
+              boxShadow: isRecording ? '0 0 6px rgba(234,88,12,0.5)' : isThinking ? '0 0 6px rgba(99,102,241,0.5)' : 'none',
+            }}
+            animate={isActive ? { height: [`${baseH*0.4}px`,`${baseH*(0.5+Math.random()*0.8)}px`,`${baseH*0.3}px`,`${baseH*(0.6+Math.random())}px`,`${baseH*0.4}px`] } : { height: '3px' }}
+            transition={isActive ? { duration: 0.4+(i%5)*0.07, repeat: Infinity, repeatType: 'mirror', delay: i*0.015, ease: 'easeInOut' } : { duration: 0.5 }}
+          />
+        )
+      })}
+    </div>
+  )
+}
+
+// ── LATENCY SPEEDOMETER GAUGE ────────────────────────────────────────────────────
+function LatencyGauge({ ms }: { ms: number }) {
+  const maxMs = 300, clampedMs = Math.min(ms, maxMs), angleDeg = (clampedMs / maxMs) * 180
+  const cx = 80, cy = 78, r = 60
+  const toXY = (deg: number) => { const rad = ((deg - 180) * Math.PI) / 180; return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) } }
+  const arcPath = (a1: number, a2: number) => { const s = toXY(a1), e = toXY(a2); return `M ${s.x} ${s.y} A ${r} ${r} 0 ${a2-a1>180?1:0} 1 ${e.x} ${e.y}` }
+  const needle = toXY(angleDeg)
+  const color = ms <= 150 ? '#34d399' : ms <= 200 ? '#f59e0b' : '#ef4444'
+  const label = ms <= 150 ? 'FAST' : ms <= 200 ? 'OK' : 'SLOW'
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
+      <svg width="160" height="96" viewBox="0 0 160 96" style={{ overflow: 'visible' }}>
+        <path d={arcPath(0,90)}   fill="none" stroke="rgba(52,211,153,0.18)"  strokeWidth="8" strokeLinecap="butt" />
+        <path d={arcPath(90,120)} fill="none" stroke="rgba(245,158,11,0.18)" strokeWidth="8" strokeLinecap="butt" />
+        <path d={arcPath(120,180)} fill="none" stroke="rgba(239,68,68,0.18)"  strokeWidth="8" strokeLinecap="butt" />
+        <motion.path d={arcPath(0,angleDeg)} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round"
+          initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.2, ease: 'easeOut' }}
+          style={{ filter: `drop-shadow(0 0 6px ${color})` }}
+        />
+        {[0,45,90,135,180].map(deg => {
+          const inner = { x: cx+(r-10)*Math.cos(((deg-180)*Math.PI)/180), y: cy+(r-10)*Math.sin(((deg-180)*Math.PI)/180) }
+          return <line key={deg} x1={inner.x} y1={inner.y} x2={toXY(deg).x} y2={toXY(deg).y} stroke="rgba(255,255,255,0.12)" strokeWidth="1" />
+        })}
+        <motion.line x1={cx} y1={cy} x2={needle.x} y2={needle.y} stroke={color} strokeWidth="2" strokeLinecap="round"
+          animate={{ x2: needle.x, y2: needle.y }} transition={{ duration: 1.2, ease: 'easeOut' }}
+          style={{ filter: `drop-shadow(0 0 4px ${color})` }}
+        />
+        <circle cx={cx} cy={cy} r="4" fill={color} style={{ filter: `drop-shadow(0 0 8px ${color})` }} />
+        <circle cx={cx} cy={cy} r="2" fill="#030508" />
+        <text x="14" y="90" fill="#4a5568" fontSize="8" fontFamily="'IBM Plex Mono',monospace">0</text>
+        <text x="70" y="16" fill="#4a5568" fontSize="8" fontFamily="'IBM Plex Mono',monospace" textAnchor="middle">150</text>
+        <text x="136" y="90" fill="#4a5568" fontSize="8" fontFamily="'IBM Plex Mono',monospace">300ms</text>
+      </svg>
+      <div style={{ textAlign: 'center', marginTop: '-4px' }}>
+        <motion.div key={ms} initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+          style={{ fontSize: '24px', fontFamily: "'IBM Plex Mono',monospace", color, fontWeight: 500, lineHeight: 1, letterSpacing: '-0.03em', textShadow: `0 0 20px ${color}55` }}>
+          {ms >= 1000 ? `${(ms/1000).toFixed(1)}s` : `${ms}ms`}
+        </motion.div>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginTop: '4px' }}>
+          <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: color, display: 'inline-block', boxShadow: `0 0 8px ${color}` }} />
+          <span style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color, letterSpacing: '0.15em', fontWeight: 700 }}>{label}</span>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── RAG PIPELINE FLOW ──────────────────────────────────────────────────────────────
+const PIPELINE_STEPS = [
+  { emoji: '🎤', label: 'Voice',  sub: 'Audio Input'    },
+  { emoji: '📡', label: 'STT',    sub: 'Sarvam saaras'  },
+  { emoji: '🔍', label: 'Search', sub: 'Qdrant HNSW'    },
+  { emoji: '🤖', label: 'LLM',    sub: 'Groq Synthesis' },
+  { emoji: '✅', label: 'Answer', sub: 'Grounded'        },
+] as const
+
+function RAGPipelineFlow({ stages, complete, recording, run }: { stages: Stage[]; complete: boolean; recording: boolean; run: number }) {
+  const activeIdx = recording ? 1 : !complete ? 3 : 5
+  return (
+    <div style={{ padding: '20px 20px 16px', background: 'rgba(6,9,16,0.72)', border: '1px solid rgba(255,255,255,0.07)', borderTopColor: 'rgba(255,255,255,0.13)', backdropFilter: 'blur(24px)', borderRadius: '8px', position: 'relative', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: 'linear-gradient(90deg,transparent,rgba(245,158,11,0.45),transparent)' }} />
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: '#ea580c', letterSpacing: '0.2em', border: '1px solid rgba(234,88,12,0.35)', padding: '2px 6px' }}>01</span>
+          <span style={{ fontSize: '10px', fontFamily: "'IBM Plex Mono',monospace", color: '#b49b67', letterSpacing: '0.15em', textTransform: 'uppercase' }}>RAG Pipeline</span>
+        </div>
+        <span style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: '#455a64', letterSpacing: '0.1em' }}>TRACE / RAG-{String(run).padStart(4, '0')}</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', width: '100%' }}>
+        {PIPELINE_STEPS.map((step, i) => {
+          const isDone = complete ? true : i < activeIdx
+          const isActive = i === activeIdx && !complete
+          const nodeColor = isDone ? '#34d399' : isActive ? '#f59e0b' : 'rgba(255,255,255,0.15)'
+          return (
+            <div key={step.label} style={{ display: 'flex', alignItems: 'flex-start', flex: i < PIPELINE_STEPS.length - 1 ? '1' : '0 0 auto' }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '6px', flexShrink: 0, width: '52px' }}>
+                <motion.div
+                  animate={isActive ? { scale: [1,1.08,1], boxShadow: ['0 0 10px rgba(245,158,11,0.3)','0 0 22px rgba(245,158,11,0.6)','0 0 10px rgba(245,158,11,0.3)'] } : {}}
+                  transition={{ repeat: Infinity, duration: 1.5 }}
+                  style={{ width: '44px', height: '44px', borderRadius: '50%', border: `1px solid ${isDone?'rgba(52,211,153,0.5)':isActive?'rgba(245,158,11,0.7)':'rgba(255,255,255,0.1)'}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px', background: isDone?'rgba(52,211,153,0.07)':isActive?'rgba(245,158,11,0.08)':'rgba(0,0,0,0.25)', boxShadow: isDone?'0 0 16px rgba(52,211,153,0.2)':isActive?'0 0 20px rgba(245,158,11,0.35)':'none', transition: 'all 0.5s ease', cursor: 'default' }}
+                >{isDone ? '✓' : step.emoji}</motion.div>
+                <div style={{ textAlign: 'center', lineHeight: 1.2 }}>
+                  <div style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: nodeColor, fontWeight: 700, letterSpacing: '0.04em', transition: 'color 0.4s' }}>{step.label}</div>
+                  <div style={{ fontSize: '8px', color: '#3d4f5a', marginTop: '2px', fontFamily: "'IBM Plex Mono',monospace" }}>{step.sub}</div>
+                  {isDone && stages[i] && (
+                    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i*0.15 }}
+                      style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: '#34d399', marginTop: '3px' }}>{stages[i][1]}
+                    </motion.div>
+                  )}
+                </div>
+              </div>
+              {i < PIPELINE_STEPS.length - 1 && (
+                <div style={{ flex: 1, position: 'relative', height: '2px', margin: '21px 2px 0' }}>
+                  <div style={{ position: 'absolute', inset: 0, background: isDone?'rgba(52,211,153,0.35)':'rgba(255,255,255,0.07)', transition: 'background 0.6s ease', borderRadius: '1px' }} />
+                  {isDone && (
+                    <motion.div style={{ position: 'absolute', inset: 0, background: 'linear-gradient(90deg,rgba(52,211,153,0.7),rgba(52,211,153,0.2))', borderRadius: '1px' }}
+                      initial={{ scaleX: 0, originX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.5, delay: i*0.15 }} />
+                  )}
+                  {isActive && (
+                    <motion.div style={{ position: 'absolute', top: '-2px', width: '8px', height: '6px', borderRadius: '50%', background: '#f59e0b', boxShadow: '0 0 10px #f59e0b' }}
+                      animate={{ left: ['0%','100%'] }} transition={{ duration: 1.2, repeat: Infinity, ease: 'linear' }} />
+                  )}
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </div>
   )
 }
 
@@ -806,6 +1013,8 @@ function Splash({ onInitialize }: { onInitialize: () => void }) {
   const [magnet, setMagnet] = useState({ x: 0, y: 0 })
   const embers = Array.from({ length: 16 }, (_, i) => ({ id: i, left: `${8 + ((i * 37) % 84)}%`, delay: (i % 7) * 0.8, duration: 9 + (i % 5) * 2, size: 2 + (i % 3) }))
   return <main className="splash-shell" style={{ '--mouse-x': `${point.x}px`, '--mouse-y': `${point.y}px`, '--parallax-x': `${point.x / 3}px`, '--parallax-y': `${point.y / 3}px` } as React.CSSProperties} onMouseMove={(e) => setPoint({ x: (e.clientX / window.innerWidth - .5) * 20, y: (e.clientY / window.innerHeight - .5) * 20 })}>
+    <CursorGlow />
+    <AuroraBackground />
     <div className="grain" />
     <div className="ember-field" aria-hidden="true">
       {embers.map((ember) => (
@@ -1320,8 +1529,11 @@ export default function Page() {
           <h1>Drishti OS</h1>
         </div>
       </div>
-      <div className="top-meta">
-        <span className="live-dot" /> DRISHTI ONLINE <span className="divider" /> INDEX v0.8.4
+      <div style={{ display: 'flex', alignItems: 'center', gap: '20px' }}>
+        <DataTicker />
+        <div className="top-meta">
+          <span className="live-dot" /> DRISHTI ONLINE <span className="divider" /> INDEX v0.8.4
+        </div>
       </div>
     </header>
   )
@@ -1543,23 +1755,27 @@ export default function Page() {
   )
 
   const workspaceTraceSection = (
-    <div className="answer-column">
-      <div className="section-label">
-        <span>01</span>
-        <p>PIPELINE TRACE</p>
-        <span className="trace-id">TRACE / RAG-{String(run).padStart(4, '0')}</span>
-      </div>
-      <div className="timeline font-sans">
-        {stages.map(([name, time, detail], i) => (
-          <div className={`stage ${complete || i === 0 ? 'done' : ''}`} key={name}>
-            <div className="stage-node">{complete ? '✓' : i + 1}</div>
-            <div>
-              <strong>{name}</strong>
-              <small>{detail}</small>
+    <div className="answer-column" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      <RAGPipelineFlow stages={stages} complete={complete} recording={recording} run={run} />
+      {/* Latency Gauge Card */}
+      <div style={{ padding: '20px', background: 'rgba(6,9,16,0.72)', border: '1px solid rgba(255,255,255,0.07)', borderTopColor: 'rgba(255,255,255,0.13)', backdropFilter: 'blur(24px)', borderRadius: '8px', position: 'relative', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: '1px', background: 'linear-gradient(90deg,transparent,rgba(245,158,11,0.45),transparent)' }} />
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div>
+            <div style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: '#ea580c', letterSpacing: '0.2em', border: '1px solid rgba(234,88,12,0.35)', padding: '2px 6px', display: 'inline-block', marginBottom: '8px' }}>02</div>
+            <div style={{ fontSize: '10px', fontFamily: "'IBM Plex Mono',monospace", color: '#b49b67', letterSpacing: '0.15em', textTransform: 'uppercase' }}>Query Latency</div>
+            <div style={{ fontSize: '8px', fontFamily: "'IBM Plex Mono',monospace", color: '#455a64', marginTop: '4px' }}>sub-200ms target · HNSW retrieval</div>
+            <div style={{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: '120px' }}>
+              {stages.map(([name, time]) => (
+                <div key={name} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '12px' }}>
+                  <span style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: '#546e7a' }}>{name}</span>
+                  <span style={{ fontSize: '9px', fontFamily: "'IBM Plex Mono',monospace", color: time === '—' ? '#374151' : '#f59e0b' }}>{time}</span>
+                </div>
+              ))}
             </div>
-            <time>{time}</time>
           </div>
-        ))}
+          <LatencyGauge ms={latencyMs} />
+        </div>
       </div>
       {latencyMetricsSection}
     </div>
@@ -1613,6 +1829,14 @@ export default function Page() {
 
   return (
     <motion.main className={`voice-shell dashboard-enter ${booting ? 'booting' : ''}`} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: .8 }}>
+      {/* Premium Visual Layers */}
+      <CursorGlow />
+      <AuroraBackground />
+      <div className="scanline-overlay" aria-hidden="true" />
+      <div className="hud-corner hud-corner-tl" aria-hidden="true" />
+      <div className="hud-corner hud-corner-tr" aria-hidden="true" />
+      <div className="hud-corner hud-corner-bl" aria-hidden="true" />
+      <div className="hud-corner hud-corner-br" aria-hidden="true" />
       <SpaceBackground isWarping={!complete || recording} />
       <div className="ambient-void" aria-hidden="true"><span>01</span><i /><i /><i /></div>
       
